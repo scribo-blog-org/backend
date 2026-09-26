@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { MailService } from '../../common/mail.service';
-import { fieldError } from '../../common/http-errors';
+import { MailService } from '../../infra/mail.service';
+import { fieldError } from '../../http/http-errors';
 import { UsersService } from '../users/users.service';
 import { EmailCodesService, RESET_PURPOSE } from './email-codes.service';
 import { setPasswordHash } from './password';

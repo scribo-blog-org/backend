@@ -1,7 +1,7 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 import { ROLE_VALUES, ROLES, type Role } from '../../authz/roles';
-import { FIELD_LIMITS } from '../../common/field-limits';
+import { FIELD_LIMITS } from '../../validation/field-limits';
 import { Notification, NotificationSchema } from './notification.schema';
 
 export type UserDocument = HydratedDocument<User>;

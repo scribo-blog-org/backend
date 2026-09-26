@@ -1,6 +1,10 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsOptional, IsString } from 'class-validator';
-import { IsCommentText, IsPostContent, IsPostTitle } from '../../../common/field-rules';
+import {
+    IsCommentText,
+    IsPostContent,
+    IsPostTitle,
+} from '../../../validation/field-rules';
 
 export class CreatePostDto {
     @ApiProperty()

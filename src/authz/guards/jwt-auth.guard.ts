@@ -15,7 +15,7 @@ import { ROLE_MANAGEMENT } from '../role-management';
 import { ROLE_PERMISSIONS } from '../role-permissions';
 import { ROLE_VALUES, type Role } from '../roles';
 import type { Actor } from '../policy';
-import { publicKeyPem } from '../../common/jwt-keys';
+import { publicKeyPem } from '../../config/jwt-keys';
 
 type JwtPayload = {
     id?: string;

@@ -5,7 +5,7 @@ import {
     IsSupportMessage,
     IsSupportReply,
     IsUserEmail,
-} from '../../../common/field-rules';
+} from '../../../validation/field-rules';
 
 export class CreateSupportDto {
     @ApiProperty({ required: false })

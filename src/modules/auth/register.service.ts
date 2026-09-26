@@ -4,10 +4,10 @@ import {
     InternalServerErrorException,
     UnauthorizedException,
 } from '@nestjs/common';
-import { MailService } from '../../common/mail.service';
-import { StorageService } from '../../common/storage.service';
-import { LoggerService } from '../../common/logger.service';
-import { fieldError } from '../../common/http-errors';
+import { MailService } from '../../infra/mail.service';
+import { StorageService } from '../../infra/storage.service';
+import { LoggerService } from '../../infra/logger.service';
+import { fieldError } from '../../http/http-errors';
 import { UsersService } from '../users/users.service';
 import { EmailCodesService } from './email-codes.service';
 import { setPasswordHash } from './password';
@@ -61,7 +61,11 @@ export class RegisterService {
             );
         }
         if (record.code !== emailCode) {
-            throw fieldError('emailCode', 'Invalid verification code!', emailCode);
+            throw fieldError(
+                'emailCode',
+                'Invalid verification code!',
+                emailCode,
+            );
         }
         return true;
     }
@@ -135,7 +139,10 @@ export class RegisterService {
         userEmail: string;
         emailCode: string;
     }) {
-        const ok = await this.confirmEmailCode(input.userEmail, input.emailCode);
+        const ok = await this.confirmEmailCode(
+            input.userEmail,
+            input.emailCode,
+        );
         if (!ok) {
             throw new UnauthorizedException('Invalid email or code');
         }

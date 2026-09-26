@@ -1,6 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
-import { RateLimitGuard } from '../common/rate-limit.guard';
+import { RateLimitGuard } from '../http/rate-limit.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PermissionsGuard } from './guards/permissions.guard';
 

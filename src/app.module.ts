@@ -4,15 +4,15 @@ import { APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
 import { AppController } from './app.controller';
 import { AuthzModule } from './authz/authz.module';
-import { ApiEnvelopeInterceptor } from './common/api-envelope.interceptor';
-import { LastActivityInterceptor } from './common/last-activity.interceptor';
+import { ApiEnvelopeInterceptor } from './http/api-envelope.interceptor';
+import { LastActivityInterceptor } from './http/last-activity.interceptor';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { ProfileModule } from './modules/profile/profile.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { PostsModule } from './modules/posts/posts.module';
-import { InfraModule } from './common/infra.module';
+import { InfraModule } from './infra/infra.module';
 import { SupportModule } from './modules/support/support.module';
 import { LogsModule } from './modules/logs/logs.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
@@ -20,7 +20,7 @@ import { SearchModule } from './modules/search/search.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { LinkPreviewModule } from './modules/link-preview/link-preview.module';
-import { publicKeyPem } from './common/jwt-keys';
+import { publicKeyPem } from './config/jwt-keys';
 @Module({
     imports: [
         ConfigModule.forRoot({ isGlobal: true }),

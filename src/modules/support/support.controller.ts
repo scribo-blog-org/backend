@@ -18,7 +18,7 @@ import {
     SupportReplyDto,
     SupportStatusDto,
 } from './dto/support.dto';
-import { ListSupportQueryDto } from '../../common/query.dto';
+import { ListSupportQueryDto } from '../../http/query.dto';
 import { SupportService } from './support.service';
 
 @ApiTags('support')
@@ -68,10 +68,7 @@ export class SupportController {
 
     @OptionalAuth()
     @Get('public/:key')
-    async getPublic(
-        @Param('key') key: string,
-        @CurrentUser() actor?: Actor,
-    ) {
+    async getPublic(@Param('key') key: string, @CurrentUser() actor?: Actor) {
         const data = await this.support.getPublic(key, actor);
         return {
             status: true,

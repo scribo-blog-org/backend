@@ -1,6 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsMongoId, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
-import { FIELD_LIMITS } from '../../../common/field-limits';
+import {
+    IsMongoId,
+    IsOptional,
+    IsString,
+    MaxLength,
+    MinLength,
+} from 'class-validator';
+import { FIELD_LIMITS } from '../../../validation/field-limits';
 
 export class CreateConversationDto {
     @ApiProperty()

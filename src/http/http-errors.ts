@@ -9,7 +9,9 @@ export type FieldErrorItem = {
     data: unknown;
 };
 
-export type ErrorBag = Partial<Record<ErrorSource, Record<string, FieldErrorItem>>>;
+export type ErrorBag = Partial<
+    Record<ErrorSource, Record<string, FieldErrorItem>>
+>;
 
 export class FieldException extends HttpException {
     readonly field: string;
@@ -53,7 +55,10 @@ export function fieldError(
     return new FieldException(field, message, data, status);
 }
 
-export function sourceFromRequest(request: Request, field: string): ErrorSource {
+export function sourceFromRequest(
+    request: Request,
+    field: string,
+): ErrorSource {
     if (Object.prototype.hasOwnProperty.call(request.params ?? {}, field)) {
         return 'params';
     }
@@ -66,7 +71,12 @@ export function sourceFromRequest(request: Request, field: string): ErrorSource 
     return 'body';
 }
 
-export function bagFromField(source: ErrorSource, field: string, message: string, data: unknown) {
+export function bagFromField(
+    source: ErrorSource,
+    field: string,
+    message: string,
+    data: unknown,
+) {
     return {
         [source]: {
             [field]: { message, data },
@@ -81,7 +91,9 @@ function flattenValidation(
     const items: { field: string; message: string; data: unknown }[] = [];
     for (const error of errors) {
         const field = parent ? `${parent}.${error.property}` : error.property;
-        const messages = error.constraints ? Object.values(error.constraints) : [];
+        const messages = error.constraints
+            ? Object.values(error.constraints)
+            : [];
         if (messages.length) {
             items.push({
                 field,

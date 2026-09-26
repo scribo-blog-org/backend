@@ -16,5 +16,5 @@ export class AppLog {
     data?: Record<string, unknown> | null;
 }
 
-export type AppLogDocument = HydratedDocument<AppLog>
-export const AppLogSchema = SchemaFactory.createForClass(AppLog)
+export type AppLogDocument = HydratedDocument<AppLog>;
+export const AppLogSchema = SchemaFactory.createForClass(AppLog);

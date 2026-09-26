@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
-import { clientIp } from './geo';
+import { clientIp } from '../visitor/geo';
 
 export type RateLimitRule = {
     name: string;

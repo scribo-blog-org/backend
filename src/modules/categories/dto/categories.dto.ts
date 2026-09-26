@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsNumber, IsOptional, IsString } from 'class-validator';
-import { IsCategoryName } from '../../../common/field-rules';
+import { IsCategoryName } from '../../../validation/field-rules';
 
 export class CreateCategoryDto {
     @ApiProperty()

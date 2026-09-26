@@ -8,8 +8,8 @@ import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import type { Actor } from '../../authz/policy';
-import { FIELD_LIMITS } from '../../common/field-limits';
-import { MailService } from '../../common/mail.service';
+import { FIELD_LIMITS } from '../../validation/field-limits';
+import { MailService } from '../../infra/mail.service';
 import { ChatMessage } from '../../database/schemas/chat-message.schema';
 import { Conversation } from '../../database/schemas/conversation.schema';
 import { User } from '../../database/schemas/user.schema';
@@ -103,7 +103,10 @@ export class ChatService {
         );
     }
 
-    private otherParticipantId(conversation: ConversationLean, actorId: string) {
+    private otherParticipantId(
+        conversation: ConversationLean,
+        actorId: string,
+    ) {
         const other = conversation.participants.find(
             (participant) => String(participant) !== actorId,
         );
@@ -168,7 +171,12 @@ export class ChatService {
     private async unreadCountForUser(userId: string) {
         const conversations = await this.conversations
             .find({ participants: this.assertObjectId(userId) })
-            .select({ _id: 1, last_message_at: 1, last_read_at: 1, participants: 1 })
+            .select({
+                _id: 1,
+                last_message_at: 1,
+                last_read_at: 1,
+                participants: 1,
+            })
             .lean<ConversationLean[]>();
 
         let total = 0;
@@ -201,10 +209,7 @@ export class ChatService {
         return unread;
     }
 
-    private async unreadForConversation(
-        row: ConversationLean,
-        userId: string,
-    ) {
+    private async unreadForConversation(row: ConversationLean, userId: string) {
         const lastRead = row.last_read_at?.[userId];
         const lastMessageAt = row.last_message_at;
         if (
@@ -344,10 +349,10 @@ export class ChatService {
         }
 
         if (isNew) {
-            await this.pushConversationUpdate(
-                String(conversation._id),
-                [actor.id, otherUserId],
-            );
+            await this.pushConversationUpdate(String(conversation._id), [
+                actor.id,
+                otherUserId,
+            ]);
 
             const recipient = await this.users
                 .findById(otherUserId)
@@ -551,7 +556,9 @@ export class ChatService {
     }
 
     async deleteMessage(messageId: string, actor: Actor) {
-        const message = await this.messages.findById(messageId).lean<MessageLean>();
+        const message = await this.messages
+            .findById(messageId)
+            .lean<MessageLean>();
         if (!message) {
             throw new NotFoundException('Message not found');
         }
@@ -581,7 +588,9 @@ export class ChatService {
             ...this.serializeMessage(updated, actor),
             status: 'sent',
             reply_preview: updated?.reply_to
-                ? await this.buildReplyPreview(updated.reply_to as Types.ObjectId)
+                ? await this.buildReplyPreview(
+                      updated.reply_to as Types.ObjectId,
+                  )
                 : null,
         };
 
@@ -594,8 +603,14 @@ export class ChatService {
         return payload;
     }
 
-    async editMessage(messageId: string, actor: Actor, input: { text: string }) {
-        const message = await this.messages.findById(messageId).lean<MessageLean>();
+    async editMessage(
+        messageId: string,
+        actor: Actor,
+        input: { text: string },
+    ) {
+        const message = await this.messages
+            .findById(messageId)
+            .lean<MessageLean>();
         if (!message) {
             throw new NotFoundException('Message not found');
         }
@@ -632,10 +647,9 @@ export class ChatService {
             conversationUpdate.last_message_text = text;
         }
         if (Object.keys(conversationUpdate).length) {
-            await this.conversations.findByIdAndUpdate(
-                conversation._id,
-                { $set: conversationUpdate },
-            );
+            await this.conversations.findByIdAndUpdate(conversation._id, {
+                $set: conversationUpdate,
+            });
         }
 
         const updated = await this.messages
@@ -651,7 +665,9 @@ export class ChatService {
             ...this.serializeMessage(updated, actor),
             status: 'sent',
             reply_preview: updated.reply_to
-                ? await this.buildReplyPreview(updated.reply_to as Types.ObjectId)
+                ? await this.buildReplyPreview(
+                      updated.reply_to as Types.ObjectId,
+                  )
                 : null,
         };
 
@@ -699,10 +715,7 @@ export class ChatService {
         );
 
         await this.pushUnread(actor.id);
-        await this.pushConversationUpdate(
-            String(conversation._id),
-            [actor.id],
-        );
+        await this.pushConversationUpdate(String(conversation._id), [actor.id]);
 
         return { read_at: now };
     }

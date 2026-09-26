@@ -5,8 +5,8 @@ import { Model, Types } from 'mongoose';
 import type { Request } from 'express';
 import { PERMISSIONS } from '../../authz/permissions';
 import { hasPermission, type Actor } from '../../authz/policy';
-import { parseDevice, parseDeviceKind } from '../../common/device';
-import { clientIp, lookupVisitorGeo } from '../../common/geo';
+import { parseDevice, parseDeviceKind } from '../../visitor/device';
+import { clientIp, lookupVisitorGeo } from '../../visitor/geo';
 import { AppLog } from '../../database/schemas/log.schema';
 import { Category } from '../../database/schemas/category.schema';
 import { PageView } from '../../database/schemas/page-view.schema';
@@ -27,7 +27,8 @@ export class AnalyticsService {
         @InjectModel(Post.name) private readonly posts: Model<Post>,
         @InjectModel(PostComment.name)
         private readonly comments: Model<PostComment>,
-        @InjectModel(Category.name) private readonly categories: Model<Category>,
+        @InjectModel(Category.name)
+        private readonly categories: Model<Category>,
         @InjectModel(AppLog.name) private readonly logs: Model<AppLog>,
         @InjectModel(SearchQueryLog.name)
         private readonly searchLogs: Model<SearchQueryLog>,
@@ -137,7 +138,10 @@ export class AnalyticsService {
         return series;
     }
 
-    private fillHours(hours: number, maps: Record<string, Map<string, number>>) {
+    private fillHours(
+        hours: number,
+        maps: Record<string, Map<string, number>>,
+    ) {
         const end = new Date();
         end.setUTCMinutes(0, 0, 0);
         const series = [];
@@ -214,12 +218,7 @@ export class AnalyticsService {
     private async periodActivity(from: Date, to?: Date) {
         const dateFilter = this.dateRangeFilter(from, to);
 
-        const [
-            logRows,
-            commentsCreated,
-            logins,
-            newUsers,
-        ] = await Promise.all([
+        const [logRows, commentsCreated, logins, newUsers] = await Promise.all([
             this.logs.aggregate([
                 {
                     $match: {
@@ -393,10 +392,7 @@ export class AnalyticsService {
                             city: {
                                 $cond: [
                                     {
-                                        $gt: [
-                                            { $ifNull: ['$city', ''] },
-                                            '',
-                                        ],
+                                        $gt: [{ $ifNull: ['$city', ''] }, ''],
                                     },
                                     '$city',
                                     'Неизвестно',
@@ -470,8 +466,7 @@ export class AnalyticsService {
                 unique_visitors: Number(row.unique_visitors || 0),
                 percent: unique_visitors
                     ? Math.round(
-                          (Number(row.unique_visitors || 0) /
-                              unique_visitors) *
+                          (Number(row.unique_visitors || 0) / unique_visitors) *
                               100,
                       )
                     : 0,
@@ -532,7 +527,9 @@ export class AnalyticsService {
         for (const post of postDocs) {
             const tags = [
                 ...new Set(
-                    this.extractHashtags(`${post.title} ${post.content_text || ''}`),
+                    this.extractHashtags(
+                        `${post.title} ${post.content_text || ''}`,
+                    ),
                 ),
             ];
             if (!tags.length) {

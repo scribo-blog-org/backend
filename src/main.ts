@@ -1,8 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { assertSetup } from './common/startup';
-import { StartupService } from './common/startup.service';
+import { assertSetup } from './config/startup';
+import { StartupService } from './infra/startup.service';
 import { configureScriboApp } from './create-app';
 
 async function bootstrap() {
@@ -18,7 +18,7 @@ async function bootstrap() {
 
         await configureScriboApp(app);
         const port = process.env.PORT ?? '3001';
-        await app.listen(port);
+        await app.listen(port, '0.0.0.0');
         logger.log(`listening on ${port}`);
     } catch (error) {
         const message =

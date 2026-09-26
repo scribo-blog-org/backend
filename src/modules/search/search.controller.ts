@@ -2,8 +2,8 @@ import { Controller, Get, Query, Req } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { Public } from '../../authz/decorators/public.decorator';
-import { RateLimits } from '../../common/rate-limit.guard';
-import { clientIp } from '../../common/geo';
+import { RateLimits } from '../../http/rate-limit.guard';
+import { clientIp } from '../../visitor/geo';
 import { SearchQueryDto } from './dto/search.dto';
 import { SearchService } from './search.service';
 

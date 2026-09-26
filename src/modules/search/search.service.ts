@@ -44,7 +44,9 @@ function snippetAround(text: string, needle: string) {
     }
     const at = plain.toLowerCase().indexOf(needle);
     if (at < 0) {
-        return plain.length > SNIPPET ? `${plain.slice(0, SNIPPET).trim()}…` : plain;
+        return plain.length > SNIPPET
+            ? `${plain.slice(0, SNIPPET).trim()}…`
+            : plain;
     }
     const start = Math.max(0, at - 32);
     const end = Math.min(plain.length, at + needle.length + SNIPPET - 32);
@@ -79,7 +81,8 @@ export class SearchService {
         @InjectModel(PostComment.name)
         private readonly comments: Model<PostComment>,
         @InjectModel(User.name) private readonly users: Model<User>,
-        @InjectModel(Category.name) private readonly categories: Model<Category>,
+        @InjectModel(Category.name)
+        private readonly categories: Model<Category>,
         @InjectModel(SearchQueryLog.name)
         private readonly searchLogs: Model<SearchQueryLog>,
         private readonly usersService: UsersService,
@@ -217,7 +220,10 @@ export class SearchService {
 
         const postsFiltered = postDocs
             .filter((post) =>
-                containsNeedle(`${post.title} ${post.content_text || ''}`, needle),
+                containsNeedle(
+                    `${post.title} ${post.content_text || ''}`,
+                    needle,
+                ),
             )
             .slice(0, RESULT_LIMIT);
         const usersFiltered = userDocs
@@ -254,7 +260,9 @@ export class SearchService {
                 .findOne({
                     query: needle,
                     ip,
-                    created_at: { $gte: new Date(Date.now() - SEARCH_DEDUPE_MS) },
+                    created_at: {
+                        $gte: new Date(Date.now() - SEARCH_DEDUPE_MS),
+                    },
                 })
                 .select('_id')
                 .lean();

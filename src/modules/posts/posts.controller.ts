@@ -18,10 +18,10 @@ import { OptionalAuth, Public } from '../../authz/decorators/public.decorator';
 import { RequirePermissions } from '../../authz/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '../../authz/permissions';
 import type { Actor } from '../../authz/policy';
-import { clientIp } from '../../common/geo';
-import { ParseMongoIdPipe } from '../../common/mongo-id';
-import { ListPostsQueryDto } from '../../common/query.dto';
-import { imageFileInterceptor } from '../../common/upload';
+import { clientIp } from '../../visitor/geo';
+import { ParseMongoIdPipe } from '../../http/mongo-id';
+import { ListPostsQueryDto } from '../../http/query.dto';
+import { imageFileInterceptor } from '../../infra/upload';
 import { CommentsService } from './comments.service';
 import { CreateCommentDto, CreatePostDto, EditPostDto } from './dto/posts.dto';
 import { PostsService } from './posts.service';
@@ -87,28 +87,40 @@ export class PostsController {
 
     @ApiBearerAuth()
     @Post(':id/save')
-    async save(@Param('id', ParseMongoIdPipe) id: string, @CurrentUser() actor: Actor) {
+    async save(
+        @Param('id', ParseMongoIdPipe) id: string,
+        @CurrentUser() actor: Actor,
+    ) {
         const data = await this.posts.save(id, actor);
         return { status: true, message: 'Post saved successfully!', data };
     }
 
     @ApiBearerAuth()
     @Delete(':id/save')
-    async unsave(@Param('id', ParseMongoIdPipe) id: string, @CurrentUser() actor: Actor) {
+    async unsave(
+        @Param('id', ParseMongoIdPipe) id: string,
+        @CurrentUser() actor: Actor,
+    ) {
         const data = await this.posts.unsave(id, actor);
         return { status: true, message: 'Post unsaved successfully!', data };
     }
 
     @ApiBearerAuth()
     @Post(':id/like')
-    async like(@Param('id', ParseMongoIdPipe) id: string, @CurrentUser() actor: Actor) {
+    async like(
+        @Param('id', ParseMongoIdPipe) id: string,
+        @CurrentUser() actor: Actor,
+    ) {
         const data = await this.posts.like(id, actor);
         return { status: true, message: 'Post liked successfully!', data };
     }
 
     @ApiBearerAuth()
     @Delete(':id/like')
-    async unlike(@Param('id', ParseMongoIdPipe) id: string, @CurrentUser() actor: Actor) {
+    async unlike(
+        @Param('id', ParseMongoIdPipe) id: string,
+        @CurrentUser() actor: Actor,
+    ) {
         const data = await this.posts.unlike(id, actor);
         return { status: true, message: 'Post unliked successfully!', data };
     }
@@ -146,7 +158,10 @@ export class PostsController {
 
     @ApiBearerAuth()
     @Delete(':id')
-    async remove(@Param('id', ParseMongoIdPipe) id: string, @CurrentUser() actor: Actor) {
+    async remove(
+        @Param('id', ParseMongoIdPipe) id: string,
+        @CurrentUser() actor: Actor,
+    ) {
         const data = await this.posts.remove(id, actor);
         return { status: true, message: 'Post deleted successfully!', data };
     }

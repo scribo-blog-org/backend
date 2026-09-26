@@ -2,7 +2,11 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 
-function joinRepeatableQuery({ value }: { value: unknown }): string | undefined {
+function joinRepeatableQuery({
+    value,
+}: {
+    value: unknown;
+}): string | undefined {
     if (value == null || value === '') {
         return undefined;
     }

@@ -94,10 +94,7 @@ export class ChatController {
     }
 
     @Delete('messages/:id')
-    async deleteMessage(
-        @Param('id') id: string,
-        @CurrentUser() actor: Actor,
-    ) {
+    async deleteMessage(@Param('id') id: string, @CurrentUser() actor: Actor) {
         const data = await this.chat.deleteMessage(id, actor);
         return { status: true, message: 'Message deleted', data };
     }

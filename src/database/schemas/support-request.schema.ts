@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
-import { FIELD_LIMITS } from '../../common/field-limits';
+import { FIELD_LIMITS } from '../../validation/field-limits';
 
 @Schema({ collection: 'supportrequests' })
 export class SupportRequest {
@@ -49,8 +49,9 @@ export class SupportRequest {
     replies!: Record<string, unknown>[];
 }
 
-export type SupportRequestDocument = HydratedDocument<SupportRequest>
-export const SupportRequestSchema = SchemaFactory.createForClass(SupportRequest)
-SupportRequestSchema.index({ status: 1, created_date: -1 })
-SupportRequestSchema.index({ kind: 1, created_date: -1 })
-SupportRequestSchema.index({ user: 1, created_date: -1 })
+export type SupportRequestDocument = HydratedDocument<SupportRequest>;
+export const SupportRequestSchema =
+    SchemaFactory.createForClass(SupportRequest);
+SupportRequestSchema.index({ status: 1, created_date: -1 });
+SupportRequestSchema.index({ kind: 1, created_date: -1 });
+SupportRequestSchema.index({ user: 1, created_date: -1 });

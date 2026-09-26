@@ -40,10 +40,10 @@ export class PageView {
     is_entry!: boolean;
 }
 
-export type PageViewDocument = HydratedDocument<PageView>
-export const PageViewSchema = SchemaFactory.createForClass(PageView)
-PageViewSchema.index({ visitor_id: 1, path: 1, created_at: -1 })
-PageViewSchema.index({ visitor_id: 1, created_at: -1 })
-PageViewSchema.index({ created_at: 1, path: 1 })
-PageViewSchema.index({ ip: 1, created_at: -1 })
-PageViewSchema.index({ city: 1, created_at: -1 })
+export type PageViewDocument = HydratedDocument<PageView>;
+export const PageViewSchema = SchemaFactory.createForClass(PageView);
+PageViewSchema.index({ visitor_id: 1, path: 1, created_at: -1 });
+PageViewSchema.index({ visitor_id: 1, created_at: -1 });
+PageViewSchema.index({ created_at: 1, path: 1 });
+PageViewSchema.index({ ip: 1, created_at: -1 });
+PageViewSchema.index({ city: 1, created_at: -1 });

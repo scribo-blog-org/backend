@@ -9,18 +9,18 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { PERMISSIONS } from '../../authz/permissions';
 import { hasPermission, isResourceOwner, type Actor } from '../../authz/policy';
-import { StorageService } from '../../common/storage.service';
-import { LoggerService } from '../../common/logger.service';
-import { parsePagination } from '../../common/pagination';
-import type { ListPostsQueryDto } from '../../common/query.dto';
-import { fieldError } from '../../common/http-errors';
-import { isMongoObjectId } from '../../common/mongo-id';
+import { StorageService } from '../../infra/storage.service';
+import { LoggerService } from '../../infra/logger.service';
+import { parsePagination } from '../../http/pagination';
+import type { ListPostsQueryDto } from '../../http/query.dto';
+import { fieldError } from '../../http/http-errors';
+import { isMongoObjectId } from '../../http/mongo-id';
 import { Category } from '../../database/schemas/category.schema';
 import { Post } from '../../database/schemas/post.schema';
 import { PostComment } from '../../database/schemas/post-comment.schema';
 import { UsersService } from '../users/users.service';
 import { CommentsService } from './comments.service';
-import { tryConsume } from '../../common/rate-limit.guard';
+import { tryConsume } from '../../http/rate-limit.guard';
 import { NotificationsService } from '../notifications/notifications.service';
 import { MentionNotificationsService } from '../notifications/mention-notifications.service';
 
@@ -206,9 +206,7 @@ export class PostsService {
         viewerKey: string,
         current: number,
     ) {
-        if (
-            !tryConsume(`post-view:${viewerKey}:${postId}`, 60_000, 20)
-        ) {
+        if (!tryConsume(`post-view:${viewerKey}:${postId}`, 60_000, 20)) {
             return current;
         }
         await this.posts.updateOne(

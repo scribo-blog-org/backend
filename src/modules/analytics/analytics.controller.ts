@@ -6,7 +6,7 @@ import { OptionalAuth } from '../../authz/decorators/public.decorator';
 import { RequirePermissions } from '../../authz/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '../../authz/permissions';
 import type { Actor } from '../../authz/policy';
-import { DashboardQueryDto } from '../../common/query.dto';
+import { DashboardQueryDto } from '../../http/query.dto';
 import { AnalyticsService } from './analytics.service';
 import { TrackVisitDto } from './dto/analytics.dto';
 

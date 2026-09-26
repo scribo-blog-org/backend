@@ -16,15 +16,18 @@ import { RequirePermissions } from '../../authz/decorators/require-permissions.d
 import { PERMISSIONS } from '../../authz/permissions';
 import type { Actor } from '../../authz/policy';
 import { ROLE_VALUES, type Role } from '../../authz/roles';
-import { fieldError } from '../../common/http-errors';
-import { ListUsersQueryDto } from '../../common/query.dto';
+import { fieldError } from '../../http/http-errors';
+import { ListUsersQueryDto } from '../../http/query.dto';
 import { UpdateRoleDto } from '../auth/dto/auth.dto';
 import { UsersService } from './users.service';
 
 @ApiTags('users')
 @Controller('users')
 export class UsersController {
-    constructor(private readonly users: UsersService, private readonly socket: SocketService) {}
+    constructor(
+        private readonly users: UsersService,
+        private readonly socket: SocketService,
+    ) {}
 
     @OptionalAuth()
     @Get()

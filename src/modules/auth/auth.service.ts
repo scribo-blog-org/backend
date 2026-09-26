@@ -1,6 +1,10 @@
-import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+    Injectable,
+    NotFoundException,
+    UnauthorizedException,
+} from '@nestjs/common';
 import type { Request } from 'express';
-import { fieldError } from '../../common/http-errors';
+import { fieldError } from '../../http/http-errors';
 import { UsersService } from '../users/users.service';
 import { comparePassword } from './password';
 import { SessionService } from './session.service';
@@ -29,7 +33,11 @@ export class AuthService {
     }
 
     private invalidGoogleToken(googleToken: string) {
-        return fieldError('googleToken', 'Google token is invalid', googleToken);
+        return fieldError(
+            'googleToken',
+            'Google token is invalid',
+            googleToken,
+        );
     }
 
     async verifyGoogleToken(googleToken: string) {
@@ -45,11 +53,7 @@ export class AuthService {
         };
     }
 
-    async loginByUsername(
-        userName: string,
-        password: string,
-        req: Request,
-    ) {
+    async loginByUsername(userName: string, password: string, req: Request) {
         const user = await this.users.getByQuery(
             {
                 $or: [

@@ -1,10 +1,5 @@
 import { applyDecorators } from '@nestjs/common';
-import {
-    IsEmail,
-    Matches,
-    MaxLength,
-    MinLength,
-} from 'class-validator';
+import { IsEmail, Matches, MaxLength, MinLength } from 'class-validator';
 import { FIELD_LIMITS } from './field-limits';
 
 export function IsPassword() {

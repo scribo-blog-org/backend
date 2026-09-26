@@ -3,9 +3,9 @@ import { RequestMethod, type INestApplication } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { ApiExceptionFilter } from './common/api-exception.filter';
-import { openApiDocument } from './common/openapi-document';
-import { ScriboValidationPipe } from './common/scribo-validation.pipe';
+import { ApiExceptionFilter } from './http/api-exception.filter';
+import { openApiDocument } from './http/openapi-document';
+import { ScriboValidationPipe } from './http/scribo-validation.pipe';
 
 function isLocalBrowserOrigin(origin: string): boolean {
     try {
@@ -66,8 +66,7 @@ export async function configureScriboApp(
         readFileSync(join(process.cwd(), 'package.json'), 'utf8'),
     ) as { version: string };
     const port = process.env.PORT ?? '3001';
-    const apiOrigin =
-        process.env.API_ORIGIN || `http://localhost:${port}`;
+    const apiOrigin = process.env.API_ORIGIN || `http://localhost:${port}`;
 
     const swagger = new DocumentBuilder()
         .setTitle('Scribo API')

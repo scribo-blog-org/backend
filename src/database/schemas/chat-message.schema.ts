@@ -1,12 +1,17 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
-import { FIELD_LIMITS } from '../../common/field-limits';
+import { FIELD_LIMITS } from '../../validation/field-limits';
 
 export type ChatMessageDocument = HydratedDocument<ChatMessage>;
 
 @Schema({ collection: 'chat_messages', timestamps: true })
 export class ChatMessage {
-    @Prop({ type: Types.ObjectId, ref: 'Conversation', required: true, index: true })
+    @Prop({
+        type: Types.ObjectId,
+        ref: 'Conversation',
+        required: true,
+        index: true,
+    })
     conversation_id!: Types.ObjectId;
 
     @Prop({ type: Types.ObjectId, ref: 'User', required: true })

@@ -13,7 +13,7 @@ import { hasPermission, isResourceOwner, type Actor } from '../../authz/policy';
 import { Post } from '../../database/schemas/post.schema';
 import { PostComment } from '../../database/schemas/post-comment.schema';
 import { UsersService } from '../users/users.service';
-import { LoggerService } from '../../common/logger.service';
+import { LoggerService } from '../../infra/logger.service';
 
 function postIdMatch(id: Types.ObjectId | string) {
     const objectId =

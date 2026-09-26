@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
-import { mongoUri } from '../common/startup';
+import { mongoUri } from '../config/startup';
 import { Session, SessionSchema } from './schemas/session.schema';
 import { User, UserSchema } from './schemas/user.schema';
 import {
@@ -25,10 +25,7 @@ import {
     Conversation,
     ConversationSchema,
 } from './schemas/conversation.schema';
-import {
-    ChatMessage,
-    ChatMessageSchema,
-} from './schemas/chat-message.schema';
+import { ChatMessage, ChatMessageSchema } from './schemas/chat-message.schema';
 
 @Module({
     imports: [

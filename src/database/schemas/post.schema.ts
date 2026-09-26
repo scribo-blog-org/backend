@@ -1,13 +1,17 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
-import { FIELD_LIMITS } from '../../common/field-limits';
+import { FIELD_LIMITS } from '../../validation/field-limits';
 
 @Schema({ collection: 'posts' })
 export class Post {
     @Prop({ type: Types.ObjectId, ref: 'User', required: true })
     author!: Types.ObjectId;
 
-    @Prop({ required: true, minlength: FIELD_LIMITS.postTitle.min, maxlength: FIELD_LIMITS.postTitle.max })
+    @Prop({
+        required: true,
+        minlength: FIELD_LIMITS.postTitle.min,
+        maxlength: FIELD_LIMITS.postTitle.max,
+    })
     title!: string;
 
     @Prop()

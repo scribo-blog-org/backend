@@ -109,7 +109,11 @@ src/
   create-app.ts           CORS, cookies, validation, Swagger
   app.module.ts
   authz/                  JWT guard, permissions, roles
-  common/                 envelope, mail, S3, rate limit, OpenAPI handle
+  http/                   envelope, errors, validation pipe, OpenAPI, rate limit
+  visitor/                client IP, geo, device
+  validation/             field limits and DTO rules
+  infra/                  mail, S3, app log, startup checks
+  config/                 env checks, Mongo URI, JWT keys
   database/               Mongoose module + schemas
   modules/
     auth/                 register, login, sessions, reset

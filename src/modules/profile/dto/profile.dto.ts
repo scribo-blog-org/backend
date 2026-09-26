@@ -1,7 +1,11 @@
 import { IsBoolean, IsOptional, IsString } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsNickName, IsPassword, IsDescription } from '../../../common/field-rules';
+import {
+    IsNickName,
+    IsPassword,
+    IsDescription,
+} from '../../../validation/field-rules';
 
 const toBoolean = ({ value }: { value: unknown }) => {
     if (value === true || value === 'true') return true;

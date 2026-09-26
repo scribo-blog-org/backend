@@ -9,8 +9,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { PERMISSIONS } from '../../authz/permissions';
 import { hasPermission, type Actor } from '../../authz/policy';
-import { fieldError } from '../../common/http-errors';
-import { LoggerService } from '../../common/logger.service';
+import { fieldError } from '../../http/http-errors';
+import { LoggerService } from '../../infra/logger.service';
 import { Category } from '../../database/schemas/category.schema';
 import { Post } from '../../database/schemas/post.schema';
 
@@ -50,11 +50,7 @@ export class CategoriesService {
                 "You don't have permission to create a category",
             );
         }
-        if (
-            await this.categories
-                .findOne({ name: data.categoryName })
-                .lean()
-        ) {
+        if (await this.categories.findOne({ name: data.categoryName }).lean()) {
             throw fieldError(
                 'categoryName',
                 'Category name already exists!',

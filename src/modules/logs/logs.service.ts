@@ -3,13 +3,15 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { PERMISSIONS } from '../../authz/permissions';
 import { hasPermission, type Actor } from '../../authz/policy';
-import { paginationMeta, parsePagination } from '../../common/pagination';
-import type { ListLogsQueryDto } from '../../common/query.dto';
+import { paginationMeta, parsePagination } from '../../http/pagination';
+import type { ListLogsQueryDto } from '../../http/query.dto';
 import { AppLog } from '../../database/schemas/log.schema';
 
 @Injectable()
 export class LogsQueryService {
-    constructor(@InjectModel(AppLog.name) private readonly logs: Model<AppLog>) {}
+    constructor(
+        @InjectModel(AppLog.name) private readonly logs: Model<AppLog>,
+    ) {}
 
     private idMatch(path: string, value: string) {
         if (!Types.ObjectId.isValid(value)) {
@@ -26,10 +28,15 @@ export class LogsQueryService {
         }
         const { page, limit, skip } = parsePagination(query, 9, 50);
         const filter: Record<string, unknown> = {};
-        if (query.user) Object.assign(filter, this.idMatch('data.user', query.user));
-        if (query.post) Object.assign(filter, this.idMatch('data.post', query.post));
+        if (query.user)
+            Object.assign(filter, this.idMatch('data.user', query.user));
+        if (query.post)
+            Object.assign(filter, this.idMatch('data.post', query.post));
         if (query.category)
-            Object.assign(filter, this.idMatch('data.category', query.category));
+            Object.assign(
+                filter,
+                this.idMatch('data.category', query.category),
+            );
         if (query.support_request)
             Object.assign(
                 filter,

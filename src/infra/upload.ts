@@ -1,5 +1,5 @@
 import { FileInterceptor } from '@nestjs/platform-express';
-import { fieldError } from './http-errors';
+import { fieldError } from '../http/http-errors';
 
 export const UPLOAD_LIMIT_SIZE = 5 * 1024 * 1024;
 

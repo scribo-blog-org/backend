@@ -29,9 +29,9 @@ describe('mentions.util', () => {
     });
 
     it('returns only newly added nicks on edit', () => {
-        expect(
-            newMentionNicks('@old one', '@old two @new_user'),
-        ).toEqual(['new_user']);
+        expect(newMentionNicks('@old one', '@old two @new_user')).toEqual([
+            'new_user',
+        ]);
     });
 
     it('strips html before matching', () => {

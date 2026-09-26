@@ -2,11 +2,8 @@ import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import AWS from 'aws-sdk';
 import path from 'path';
-import { fieldError } from './http-errors';
-import {
-    ALLOWED_IMAGE_MIME_TYPES,
-    UPLOAD_LIMIT_SIZE,
-} from './upload';
+import { fieldError } from '../http/http-errors';
+import { ALLOWED_IMAGE_MIME_TYPES, UPLOAD_LIMIT_SIZE } from './upload';
 
 process.env.AWS_SDK_JS_SUPPRESS_MAINTENANCE_MODE_MESSAGE = '1';
 

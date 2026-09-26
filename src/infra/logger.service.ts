@@ -5,14 +5,19 @@ import { AppLog } from '../database/schemas/log.schema';
 
 @Injectable()
 export class LoggerService {
-    constructor(@InjectModel(AppLog.name) private readonly logs: Model<AppLog>) {}
+    constructor(
+        @InjectModel(AppLog.name) private readonly logs: Model<AppLog>,
+    ) {}
 
     async log(input: {
         type: string;
         message: string;
         data?: Record<string, unknown> | null;
     }) {
-        if (typeof input.type !== 'string' || typeof input.message !== 'string') {
+        if (
+            typeof input.type !== 'string' ||
+            typeof input.message !== 'string'
+        ) {
             return;
         }
         try {

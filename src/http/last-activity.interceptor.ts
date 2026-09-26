@@ -17,14 +17,17 @@ export class LastActivityInterceptor implements NestInterceptor {
         private readonly tokens: TokenService,
     ) {}
 
-    intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    intercept(
+        context: ExecutionContext,
+        next: CallHandler,
+    ): Observable<unknown> {
         if (context.getType() !== 'http') {
             return next.handle();
         }
 
-        const request = context.switchToHttp().getRequest<
-            Request & { auth?: Actor }
-        >();
+        const request = context
+            .switchToHttp()
+            .getRequest<Request & { auth?: Actor }>();
         const userId = this.resolveUserId(request);
         if (userId) {
             this.users.touchLastActivity(userId);

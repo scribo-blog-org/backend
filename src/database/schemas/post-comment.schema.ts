@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
-import { FIELD_LIMITS } from '../../common/field-limits';
+import { FIELD_LIMITS } from '../../validation/field-limits';
 
 @Schema({ collection: 'post_comments' })
 export class PostComment {

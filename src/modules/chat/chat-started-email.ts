@@ -59,5 +59,4 @@ export function chatStartedEmailTemplate({
   </body>
 </html>
 `;
-
 }

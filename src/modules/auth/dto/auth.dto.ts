@@ -7,7 +7,7 @@ import {
     IsNickName,
     IsPassword,
     IsUserEmail,
-} from '../../../common/field-rules';
+} from '../../../validation/field-rules';
 
 export class LoginUsernameDto {
     @ApiProperty({ example: 'Dev' })

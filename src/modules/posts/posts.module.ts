@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../../database/database.module';
-import { InfraModule } from '../../common/infra.module';
+import { InfraModule } from '../../infra/infra.module';
 import { UsersModule } from '../users/users.module';
 import { CommentsController } from './comments.controller';
 import { CommentsService } from './comments.service';

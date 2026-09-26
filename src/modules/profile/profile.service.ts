@@ -7,11 +7,11 @@ import {
 import { ROLE_MANAGEMENT } from '../../authz/role-management';
 import { ROLE_PERMISSIONS } from '../../authz/role-permissions';
 import type { Actor } from '../../authz/policy';
-import { StorageService } from '../../common/storage.service';
-import { fieldError } from '../../common/http-errors';
+import { StorageService } from '../../infra/storage.service';
+import { fieldError } from '../../http/http-errors';
 import { comparePassword, setPasswordHash } from '../auth/password';
 import { UsersService } from '../users/users.service';
-import { MailService } from '../../common/mail.service';
+import { MailService } from '../../infra/mail.service';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()

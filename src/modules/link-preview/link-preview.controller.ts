@@ -10,7 +10,9 @@ export class LinkPreviewController {
 
     @OptionalAuth()
     @Get()
-    @ApiOperation({ summary: 'Fetch Open Graph preview for a URL (no storage)' })
+    @ApiOperation({
+        summary: 'Fetch Open Graph preview for a URL (no storage)',
+    })
     async preview(@Query('url') url: string) {
         const data = await this.previews.fetchPreview(url);
         return { status: true, message: 'Preview fetched', data };

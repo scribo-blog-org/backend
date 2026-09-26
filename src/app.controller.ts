@@ -1,6 +1,6 @@
 import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { Public } from './authz/decorators/public.decorator';
-import { openApiDocument } from './common/openapi-document';
+import { openApiDocument } from './http/openapi-document';
 
 @Controller()
 export class AppController {
@@ -28,7 +28,9 @@ export class AppController {
     @Get('docs')
     docs() {
         if (!openApiDocument.current) {
-            throw new ServiceUnavailableException('OpenAPI document is not ready');
+            throw new ServiceUnavailableException(
+                'OpenAPI document is not ready',
+            );
         }
         return {
             status: true,

@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as jwt from 'jsonwebtoken';
 import type { Role } from '../../authz/roles';
-import { privateKeyFromEnv, publicKeyFromEnv } from '../../common/jwt-keys';
+import { privateKeyFromEnv, publicKeyFromEnv } from '../../config/jwt-keys';
 
 const ACCESS_TTL = '15m';
 const REFRESH_TTL = '30d';
