@@ -1,28 +1,53 @@
 import { createHash } from 'crypto';
-import { Injectable, ForbiddenException } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import {
+    Injectable,
+    ForbiddenException,
+    Logger,
+    OnModuleDestroy,
+    OnModuleInit,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import Redis from 'ioredis';
+import { Connection, Model } from 'mongoose';
 import type { Request } from 'express';
 import { PERMISSIONS } from '../../authz/permissions';
 import { hasPermission, type Actor } from '../../authz/policy';
-import { parseDevice, parseDeviceKind } from '../../visitor/device';
-import { clientIp, lookupVisitorGeo } from '../../visitor/geo';
+import { clientIp } from '../../visitor/geo';
 import { AppLog } from '../../database/schemas/log.schema';
 import { Category } from '../../database/schemas/category.schema';
-import { PageView } from '../../database/schemas/page-view.schema';
 import { Post } from '../../database/schemas/post.schema';
 import { PostComment } from '../../database/schemas/post-comment.schema';
 import { User } from '../../database/schemas/user.schema';
 import { SearchQueryLog } from '../../database/schemas/search-query.schema';
 import { Session } from '../../database/schemas/session.schema';
+import {
+    VisitDay,
+    VisitHour,
+} from '../../database/schemas/visit-bucket.schema';
 
-const DEDUPE_MS = 8000;
-const SESSION_MS = 30 * 60 * 1000;
+const DEDUPE_SECONDS = 8;
+const LEGACY_PAGEVIEWS = 'pageviews';
+const LEGACY_PAGEVIEWS_STAGING = 'pageviews_migrating';
+
+type VisitBucket = {
+    authorized?: number;
+    anonymous?: number;
+    imported_authorized?: number;
+    imported_anonymous?: number;
+};
 
 @Injectable()
-export class AnalyticsService {
+export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
+    private readonly logger = new Logger(AnalyticsService.name);
+    private readonly redis: Redis;
+
     constructor(
-        @InjectModel(PageView.name) private readonly pageViews: Model<PageView>,
+        config: ConfigService,
+        @InjectConnection() private readonly connection: Connection,
+        @InjectModel(VisitDay.name) private readonly visitDays: Model<VisitDay>,
+        @InjectModel(VisitHour.name)
+        private readonly visitHours: Model<VisitHour>,
         @InjectModel(User.name) private readonly users: Model<User>,
         @InjectModel(Post.name) private readonly posts: Model<Post>,
         @InjectModel(PostComment.name)
@@ -33,7 +58,32 @@ export class AnalyticsService {
         @InjectModel(SearchQueryLog.name)
         private readonly searchLogs: Model<SearchQueryLog>,
         @InjectModel(Session.name) private readonly sessions: Model<Session>,
-    ) {}
+    ) {
+        this.redis = new Redis(config.getOrThrow<string>('REDIS_URL'), {
+            maxRetriesPerRequest: 1,
+            connectTimeout: 1000,
+            commandTimeout: 500,
+        });
+        this.redis.on('error', (error: Error) => {
+            this.logger.warn(error.message);
+        });
+    }
+
+    async onModuleInit() {
+        try {
+            await this.migrateLegacyPageViews();
+        } catch (error) {
+            const message =
+                error instanceof Error
+                    ? error.message
+                    : 'pageviews migration failed';
+            this.logger.error(message);
+        }
+    }
+
+    async onModuleDestroy() {
+        await this.redis.quit();
+    }
 
     private utcDayString(date: Date) {
         return date.toISOString().slice(0, 10);
@@ -62,16 +112,6 @@ export class AnalyticsService {
         return {
             $dateToString: {
                 format: '%Y-%m-%d',
-                date: `$${field}`,
-                timezone: 'UTC',
-            },
-        };
-    }
-
-    private hourKeyExpr(field: string) {
-        return {
-            $dateToString: {
-                format: '%Y-%m-%dT%H',
                 date: `$${field}`,
                 timezone: 'UTC',
             },
@@ -171,48 +211,84 @@ export class AnalyticsService {
         req: Request,
     ) {
         const path = this.sanitizePath(body.pagePath);
-        const visitor_id = this.resolveVisitorId(actor, req);
-        const referrer = String(body.pageReferrer || '').slice(0, 500);
-        const user =
-            actor?.id && Types.ObjectId.isValid(actor.id)
-                ? new Types.ObjectId(actor.id)
-                : null;
-        const ip = clientIp(req);
-        const geo = await lookupVisitorGeo(req);
-        const userAgent = String(req.headers['user-agent'] || '');
+        const visitorId = this.resolveVisitorId(actor, req);
+        const counted = await this.claimVisit(visitorId, path);
+        if (!counted) {
+            return { counted: false };
+        }
 
-        const recent = await this.pageViews
-            .findOne({
-                visitor_id,
-                path,
-                created_at: { $gte: new Date(Date.now() - DEDUPE_MS) },
-            })
-            .lean();
-        if (recent) return recent;
+        const now = new Date();
+        const bucketAt = this.hourStart(now);
+        const field = actor?.id ? 'authorized' : 'anonymous';
 
-        const lastVisit = await this.pageViews
-            .findOne({ visitor_id })
-            .sort({ created_at: -1 })
-            .select({ created_at: 1 })
-            .lean();
-        const is_entry =
-            !lastVisit ||
-            Date.now() - new Date(lastVisit.created_at).getTime() > SESSION_MS;
+        await Promise.all([
+            this.visitDays.updateOne(
+                { day: this.utcDayString(now) },
+                { $inc: { [field]: 1 } },
+                { upsert: true },
+            ),
+            this.visitHours.updateOne(
+                { hour: this.hourKey(bucketAt) },
+                {
+                    $inc: { [field]: 1 },
+                    $setOnInsert: { bucket_at: bucketAt },
+                },
+                { upsert: true },
+            ),
+        ]);
 
-        const created = await this.pageViews.create({
-            path,
-            visitor_id,
-            referrer,
-            user,
-            ip: geo.ip || ip,
-            city: geo.city,
-            region: geo.region,
-            country: geo.country,
-            device: parseDevice(userAgent),
-            device_kind: parseDeviceKind(userAgent),
-            is_entry,
-        });
-        return created.toObject();
+        return { counted: true };
+    }
+
+    private hourStart(date: Date) {
+        const hour = new Date(date);
+        hour.setUTCMinutes(0, 0, 0);
+        return hour;
+    }
+
+    private hourKey(date: Date) {
+        return date.toISOString().slice(0, 13);
+    }
+
+    private bucketParts(row: VisitBucket) {
+        return {
+            authorized:
+                Number(row.authorized || 0) +
+                Number(row.imported_authorized || 0),
+            anonymous:
+                Number(row.anonymous || 0) +
+                Number(row.imported_anonymous || 0),
+        };
+    }
+
+    private sumBuckets(rows: VisitBucket[]) {
+        return rows.reduce<{ authorized: number; anonymous: number }>(
+            (total, row) => {
+                const parts = this.bucketParts(row);
+                total.authorized += parts.authorized;
+                total.anonymous += parts.anonymous;
+                return total;
+            },
+            { authorized: 0, anonymous: 0 },
+        );
+    }
+
+    private async claimVisit(visitorId: string, path: string) {
+        try {
+            const claimed = await this.redis.set(
+                `visit:${visitorId}:${path}`,
+                '1',
+                'EX',
+                DEDUPE_SECONDS,
+                'NX',
+            );
+            return claimed === 'OK';
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : 'visit dedupe failed';
+            this.logger.warn(message);
+            return true;
+        }
     }
 
     private async periodActivity(from: Date, to?: Date) {
@@ -294,183 +370,32 @@ export class AnalyticsService {
             period.mode === 'hours'
                 ? this.hoursAgo(period.hours * 2)
                 : this.rangeStart(period.days * 2);
-        const previousMatch = { created_at: { $gte: previousFrom, $lt: from } };
-        const currentMatch = { created_at: { $gte: from } };
-        const bucketExpr =
-            period.mode === 'hours'
-                ? this.hourKeyExpr('created_at')
-                : this.dayKeyExpr('created_at');
-        const authorized = (base: object) => ({
-            ...base,
-            user: { $exists: true, $ne: null },
-        });
-        const anonymous = (base: object) => ({
-            ...base,
-            $or: [{ user: { $exists: false } }, { user: null }],
-        });
-
-        const ipMatch = (base: object) => ({
-            ...base,
-            ip: { $nin: [null, ''] },
-        });
-
-        const [
-            visits,
-            previousVisits,
-            unique_visitors,
-            previousUnique,
-            authorized_visits,
-            anonymous_visits,
-            visitSeries,
-            paths,
-            cities,
-            searchInsights,
-            contentTags,
-            topPosts,
-            activity,
-        ] = await Promise.all([
-            this.pageViews.countDocuments(currentMatch),
-            this.pageViews.countDocuments(previousMatch),
-            this.pageViews
-                .distinct('ip', ipMatch(currentMatch))
-                .then((rows) => rows.filter(Boolean).length),
-            this.pageViews
-                .distinct('ip', ipMatch(previousMatch))
-                .then((rows) => rows.filter(Boolean).length),
-            this.pageViews.countDocuments(authorized(currentMatch)),
-            this.pageViews.countDocuments(anonymous(currentMatch)),
-            this.pageViews.aggregate([
-                { $match: currentMatch },
-                {
-                    $group: {
-                        _id: bucketExpr,
-                        count: { $sum: 1 },
-                    },
-                },
-                { $sort: { _id: 1 } },
-            ]),
-            this.pageViews.aggregate([
-                { $match: { created_at: { $gte: from } } },
-                {
-                    $group: {
-                        _id: '$path',
-                        visits: { $sum: 1 },
-                        unique_visitors: {
-                            $addToSet: {
-                                $cond: [
-                                    { $gt: ['$ip', ''] },
-                                    '$ip',
-                                    '$$REMOVE',
-                                ],
-                            },
-                        },
-                    },
-                },
-                {
-                    $project: {
-                        path: '$_id',
-                        visits: 1,
-                        unique_visitors: { $size: '$unique_visitors' },
-                        _id: 0,
-                    },
-                },
-                { $sort: { visits: -1 } },
-                { $limit: 5 },
-            ]),
-            this.pageViews.aggregate([
-                { $match: ipMatch(currentMatch) },
-                {
-                    $group: {
-                        _id: '$ip',
-                        city: { $last: '$city' },
-                        country: { $last: '$country' },
-                    },
-                },
-                {
-                    $group: {
-                        _id: {
-                            city: {
-                                $cond: [
-                                    {
-                                        $gt: [{ $ifNull: ['$city', ''] }, ''],
-                                    },
-                                    '$city',
-                                    'Неизвестно',
-                                ],
-                            },
-                            country: { $ifNull: ['$country', ''] },
-                        },
-                        unique_visitors: { $sum: 1 },
-                    },
-                },
-                { $sort: { unique_visitors: -1 } },
-                { $limit: 8 },
-                {
-                    $project: {
-                        city: '$_id.city',
-                        country: '$_id.country',
-                        unique_visitors: 1,
-                        _id: 0,
-                    },
-                },
-            ]),
-            this.searchInsights(from, previousFrom),
-            this.contentHashtags(5),
-            this.posts
-                .find({ views_count: { $gt: 0 } })
-                .select('_id title views_count')
-                .sort({ views_count: -1 })
-                .limit(5)
-                .lean(),
-            this.periodActivity(from),
-        ]);
-
-        const audience = {
-            authorized_visits,
-            anonymous_visits,
-        };
-
-        const visitMap = this.toMap(
-            visitSeries as { _id: string; count: number }[],
-        );
-        const series =
-            period.mode === 'hours'
-                ? this.fillHours(period.hours, {
-                      visits: visitMap,
-                  })
-                : this.fillDays(period.days, {
-                      visits: visitMap,
-                  });
+        const traffic = await this.trafficTotals(period);
+        const [searchInsights, contentTags, topPosts, activity] =
+            await Promise.all([
+                this.searchInsights(from, previousFrom),
+                this.contentHashtags(5),
+                this.posts
+                    .find({ views_count: { $gt: 0 } })
+                    .select('_id title views_count')
+                    .sort({ views_count: -1 })
+                    .limit(5)
+                    .lean(),
+                this.periodActivity(from),
+            ]);
 
         return {
             days: period.key,
             totals: {
-                visits,
-                visits_prev: previousVisits,
-                unique_visitors,
-                unique_visitors_prev: previousUnique,
+                visits: traffic.visits,
+                visits_prev: traffic.visits_prev,
             },
-            series,
+            series: traffic.series,
             activity,
-            audience,
-            top_paths: paths as Array<{ path: string; visits: number }>,
-            top_cities: (
-                cities as Array<{
-                    city: string;
-                    country?: string;
-                    unique_visitors: number;
-                }>
-            ).map((row) => ({
-                city: row.city,
-                country: row.country || '',
-                unique_visitors: Number(row.unique_visitors || 0),
-                percent: unique_visitors
-                    ? Math.round(
-                          (Number(row.unique_visitors || 0) / unique_visitors) *
-                              100,
-                      )
-                    : 0,
-            })),
+            audience: {
+                authorized_visits: traffic.authorized_visits,
+                anonymous_visits: traffic.anonymous_visits,
+            },
             top_posts: (
                 topPosts as Array<{
                     _id: unknown;
@@ -659,6 +584,205 @@ export class AnalyticsService {
             top_hashtag_queries,
             zero_queries,
         };
+    }
+
+    private async trafficTotals(period: {
+        mode: 'hours' | 'days';
+        hours?: number;
+        days?: number;
+    }) {
+        if (period.mode === 'hours') {
+            const end = this.hourStart(new Date());
+            const start = new Date(end);
+            start.setUTCHours(start.getUTCHours() - ((period.hours || 24) - 1));
+            const rows = await this.visitHours
+                .find({
+                    hour: {
+                        $gte: this.hourKey(start),
+                        $lte: this.hourKey(end),
+                    },
+                })
+                .lean();
+            const audience = this.sumBuckets(rows);
+            const visitMap = new Map(
+                rows.map((row) => [
+                    row.hour,
+                    this.bucketParts(row).authorized +
+                        this.bucketParts(row).anonymous,
+                ]),
+            );
+
+            return {
+                visits: audience.authorized + audience.anonymous,
+                visits_prev: null,
+                authorized_visits: audience.authorized,
+                anonymous_visits: audience.anonymous,
+                series: this.fillHours(period.hours || 24, {
+                    visits: visitMap,
+                }),
+            };
+        }
+
+        const days = period.days || 14;
+        const from = this.utcDayString(this.rangeStart(days));
+        const previousFrom = this.utcDayString(this.rangeStart(days * 2));
+        const rows = await this.visitDays
+            .find({ day: { $gte: previousFrom } })
+            .lean();
+        const current = rows.filter((row) => row.day >= from);
+        const previous = rows.filter((row) => row.day < from);
+        const audience = this.sumBuckets(current);
+        const previousAudience = this.sumBuckets(previous);
+        const visitMap = new Map(
+            current.map((row) => [
+                row.day,
+                this.bucketParts(row).authorized +
+                    this.bucketParts(row).anonymous,
+            ]),
+        );
+
+        return {
+            visits: audience.authorized + audience.anonymous,
+            visits_prev:
+                previousAudience.authorized + previousAudience.anonymous,
+            authorized_visits: audience.authorized,
+            anonymous_visits: audience.anonymous,
+            series: this.fillDays(days, { visits: visitMap }),
+        };
+    }
+
+    private async migrateLegacyPageViews() {
+        const db = this.connection.db;
+        if (!db) {
+            return;
+        }
+
+        const has = async (name: string) =>
+            (await db.listCollections({ name }).toArray()).length > 0;
+
+        if (await has(LEGACY_PAGEVIEWS_STAGING)) {
+            await this.foldLegacyPageViews(LEGACY_PAGEVIEWS_STAGING);
+        }
+
+        if (!(await has(LEGACY_PAGEVIEWS))) {
+            return;
+        }
+
+        const legacy = db.collection(LEGACY_PAGEVIEWS);
+        if ((await legacy.estimatedDocumentCount()) === 0) {
+            await legacy.drop();
+            return;
+        }
+
+        await legacy.rename(LEGACY_PAGEVIEWS_STAGING);
+        await this.foldLegacyPageViews(LEGACY_PAGEVIEWS_STAGING);
+    }
+
+    private async foldLegacyPageViews(sourceName: string) {
+        const db = this.connection.db;
+        if (!db) {
+            return;
+        }
+
+        const source = db.collection(sourceName);
+        const group = {
+            authorized: {
+                $sum: {
+                    $cond: [
+                        { $ne: [{ $ifNull: ['$user', null] }, null] },
+                        1,
+                        0,
+                    ],
+                },
+            },
+            anonymous: {
+                $sum: {
+                    $cond: [
+                        { $eq: [{ $ifNull: ['$user', null] }, null] },
+                        1,
+                        0,
+                    ],
+                },
+            },
+        };
+        const days = await source
+            .aggregate<{
+                _id: string;
+                authorized: number;
+                anonymous: number;
+            }>([
+                {
+                    $group: {
+                        _id: this.dayKeyExpr('created_at'),
+                        ...group,
+                    },
+                },
+            ])
+            .toArray();
+        const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const hours = await source
+            .aggregate<{
+                _id: string;
+                authorized: number;
+                anonymous: number;
+            }>([
+                { $match: { created_at: { $gte: since } } },
+                {
+                    $group: {
+                        _id: {
+                            $dateToString: {
+                                format: '%Y-%m-%dT%H',
+                                date: '$created_at',
+                                timezone: 'UTC',
+                            },
+                        },
+                        ...group,
+                    },
+                },
+            ])
+            .toArray();
+
+        if (days.length) {
+            await this.visitDays.bulkWrite(
+                days.map((row) => ({
+                    updateOne: {
+                        filter: { day: row._id },
+                        update: {
+                            $set: {
+                                imported_authorized: row.authorized,
+                                imported_anonymous: row.anonymous,
+                            },
+                        },
+                        upsert: true,
+                    },
+                })),
+            );
+        }
+
+        if (hours.length) {
+            await this.visitHours.bulkWrite(
+                hours.map((row) => ({
+                    updateOne: {
+                        filter: { hour: row._id },
+                        update: {
+                            $set: {
+                                imported_authorized: row.authorized,
+                                imported_anonymous: row.anonymous,
+                            },
+                            $setOnInsert: {
+                                bucket_at: new Date(`${row._id}:00:00.000Z`),
+                            },
+                        },
+                        upsert: true,
+                    },
+                })),
+            );
+        }
+
+        await source.drop();
+        this.logger.log(
+            `folded ${days.length} daily buckets from legacy pageviews`,
+        );
     }
 
     private async likesTotal() {
