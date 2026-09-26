@@ -1,9 +1,11 @@
-import { Injectable } from '@nestjs/common';
-import { SocketClient } from './socket.client';
+import { Injectable, Logger } from '@nestjs/common';
+import { RedisPublisher } from './redis.publisher';
 
 @Injectable()
 export class SocketEvents {
-    constructor(private readonly socketClient: SocketClient) {}
+    private readonly logger = new Logger(SocketEvents.name);
+
+    constructor(private readonly redis: RedisPublisher) {}
 
     chatRoom(conversationId: string) {
         return `chat:${conversationId}`;
@@ -13,19 +15,13 @@ export class SocketEvents {
         room: string,
         event: string,
         payload: unknown,
-        options: { private?: boolean } = { private: true },
     ): Promise<void> {
-        const channel = this.socketClient.client.channel(room, {
-            config: {
-                private: options.private !== false,
-            },
-        });
-
-        const result = await channel.httpSend(event, payload);
-
-        if (!result.success) {
-            throw new Error(
-                `Broadcast failed: ${result.status} ${result.error}`,
+        try {
+            await this.redis.publish(room, event, payload);
+        } catch (error: unknown) {
+            this.logger.error(
+                `Redis publish failed for ${room} ${event}`,
+                error instanceof Error ? error.stack : error,
             );
         }
     }
@@ -74,5 +70,4 @@ export class SocketEvents {
             conversation_id: conversationId,
         });
     }
-
 }

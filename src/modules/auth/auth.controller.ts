@@ -185,7 +185,6 @@ export class AuthController {
             message: 'Login by username successful',
             data: {
                 accessToken: tokens.accessToken,
-                socketToken: tokens.socketToken,
             },
         };
     }
@@ -205,7 +204,6 @@ export class AuthController {
             message: 'Login by Google successful',
             data: {
                 accessToken: tokens.accessToken,
-                socketToken: tokens.socketToken,
             },
         };
     }
@@ -224,7 +222,6 @@ export class AuthController {
             message: 'Token refreshed',
             data: {
                 accessToken: tokens.accessToken,
-                socketToken: tokens.socketToken,
             },
         };
     }

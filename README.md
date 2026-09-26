@@ -82,11 +82,7 @@ Copy `.env.example`. Do not commit `.env`.
 | `AWS_CONNECT_SECRET_ACCESS_KEY` | for uploads | S3 secret |
 | `AWS_CONNECT_REGION` | for uploads | e.g. `eu-central-1` |
 | `AWS_CONNECT_BUCKET_NAME` | for uploads | Bucket name |
-| `SUPABASE_URL` | yes | Supabase project URL for realtime |
-| `SUPABASE_SECRET_KEY` | yes | Supabase secret key, server only |
-| `SOCKET_JWT_SECRET_KEY` | yes | PEM private key for socket tokens |
-| `SOCKET_JWT_PUBLIC_KEY` | yes | PEM public key for socket tokens |
-| `SOCKET_JWT_KID` | no | Key id on the socket JWT |
+| `REDIS_URL` | yes | Redis bus for realtime events, `redis://127.0.0.1:6379` from the host |
 
 \* Provide either `MONGODB_URI` or all of `DB_USER`, `DB_PASSWORD`, `DB_HOST`, and `DB_NAME`.
 

@@ -1,7 +1,10 @@
 import { ConfigService } from '@nestjs/config';
+import { assertKeyPair } from './jwt-keys';
 
 const REQUIRED_ENV = [
-    'JWTKEY',
+    'JWT_PRIVATE_KEY',
+    'JWT_PUBLIC_KEY',
+    'REDIS_URL',
     'AWS_CONNECT_ACCESS_KEY',
     'AWS_CONNECT_SECRET_ACCESS_KEY',
     'AWS_CONNECT_REGION',
@@ -18,6 +21,7 @@ export function assertSetup(env: NodeJS.ProcessEnv) {
     if (missing.length) {
         throw new Error(`Setup failed, missing: ${missing.join(', ')}`);
     }
+    assertKeyPair(env.JWT_PRIVATE_KEY!.trim(), env.JWT_PUBLIC_KEY!.trim());
 }
 
 export function mongoUri(config: ConfigService) {
@@ -51,8 +55,8 @@ function mongoConfigured(env: NodeJS.ProcessEnv) {
     if (env.MONGODB_URI?.trim()) return true;
     return Boolean(
         env.DB_USER?.trim() &&
-            env.DB_PASSWORD?.trim() &&
-            env.DB_HOST?.trim() &&
-            env.DB_NAME?.trim(),
+        env.DB_PASSWORD?.trim() &&
+        env.DB_HOST?.trim() &&
+        env.DB_NAME?.trim(),
     );
 }

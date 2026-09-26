@@ -145,7 +145,6 @@ export class SessionService implements OnModuleInit {
 
         return {
             accessToken: this.tokens.encodeAccess(user, String(sessionId)),
-            socketToken: this.tokens.encodeSocket(user),
             refreshToken,
         };
     }
@@ -220,7 +219,6 @@ export class SessionService implements OnModuleInit {
                     user as never,
                     String(session._id),
                 ),
-                socketToken: this.tokens.encodeSocket(user),
                 refreshToken: token,
             };
         }

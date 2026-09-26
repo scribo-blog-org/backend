@@ -15,6 +15,7 @@ import { ROLE_MANAGEMENT } from '../role-management';
 import { ROLE_PERMISSIONS } from '../role-permissions';
 import { ROLE_VALUES, type Role } from '../roles';
 import type { Actor } from '../policy';
+import { publicKeyPem } from '../../common/jwt-keys';
 
 type JwtPayload = {
     id?: string;
@@ -88,7 +89,10 @@ export class JwtAuthGuard implements CanActivate {
     private decodeAccess(token: string): Actor | null {
         try {
             const decoded = this.jwtService.verify<JwtPayload>(token, {
-                secret: this.config.getOrThrow<string>('JWTKEY'),
+                publicKey: publicKeyPem(
+                    this.config.getOrThrow<string>('JWT_PUBLIC_KEY'),
+                ),
+                algorithms: ['RS256'],
             });
 
             if (decoded.tokenType === 'refresh' || decoded.typ === 'refresh') {

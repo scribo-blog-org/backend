@@ -2,7 +2,6 @@ import {
     BadRequestException,
     ForbiddenException,
     Injectable,
-    InternalServerErrorException,
     NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -343,11 +342,6 @@ export class ChatService {
             conversation = created.toObject() as ConversationLean;
             isNew = true;
         }
-
-        this.socketService.syncConversationMembers(
-            String(conversation._id),
-            [actor.id, otherUserId],
-        );
 
         if (isNew) {
             await this.pushConversationUpdate(
@@ -719,14 +713,6 @@ export class ChatService {
             actor,
         );
         const participantIds = this.participantIds(conversation);
-
-        try {
-            await this.socketService.removeConversationMembers(conversationId);
-        } catch {
-            throw new InternalServerErrorException(
-                'Failed to remove conversation access',
-            );
-        }
 
         await this.messages.deleteMany({
             conversation_id: conversation._id,
