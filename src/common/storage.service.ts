@@ -21,8 +21,25 @@ export class StorageService {
                 'AWS_CONNECT_SECRET_ACCESS_KEY',
             ),
             region: this.config.get<string>('AWS_CONNECT_REGION'),
+            maxRetries: 0,
+            httpOptions: { timeout: 8000, connectTimeout: 5000 },
         });
-        this.s3 = new AWS.S3();
+        this.s3 = new AWS.S3({ maxRetries: 0 });
+    }
+
+    async assertReady() {
+        const bucket = this.config
+            .get<string>('AWS_CONNECT_BUCKET_NAME')
+            ?.trim();
+        const region = this.config.get<string>('AWS_CONNECT_REGION')?.trim();
+        if (!bucket || !region) {
+            throw new Error(
+                'AWS setup failed: AWS_CONNECT_BUCKET_NAME and AWS_CONNECT_REGION are required',
+            );
+        }
+
+        await this.s3.headBucket({ Bucket: bucket }).promise();
+        return { bucket, region };
     }
 
     async uploadImage(

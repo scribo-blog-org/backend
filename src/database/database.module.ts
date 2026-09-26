@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { mongoUri } from '../common/startup';
 import { Session, SessionSchema } from './schemas/session.schema';
 import { User, UserSchema } from './schemas/user.schema';
 import {
@@ -35,21 +36,14 @@ import {
             imports: [ConfigModule],
             inject: [ConfigService],
             useFactory: (config: ConfigService) => {
-                const uri = config.get<string>('MONGODB_URI');
-                if (uri) {
-                    return { uri };
-                }
-
-                const user = config.get<string>('DB_USER');
-                const password = config.get<string>('DB_PASSWORD');
-                if (!user || !password) {
-                    throw new Error(
-                        'Set MONGODB_URI or DB_USER and DB_PASSWORD',
-                    );
-                }
-
+                const uri = mongoUri(config);
                 return {
-                    uri: `mongodb+srv://${user}:${password}@cluster0.lccalb5.mongodb.net/?retryWrites=true&w=majority`,
+                    uri,
+                    retryAttempts: 0,
+                    serverSelectionTimeoutMS: 8000,
+                    connectTimeoutMS: 8000,
+                    socketTimeoutMS: 10000,
+                    bufferCommands: false,
                 };
             },
         }),

@@ -69,22 +69,26 @@ Copy `.env.example`. Do not commit `.env`.
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `PORT` | no | Default `3001` |
-| `MONGODB_URI` | yes* | Preferred connection string |
-| `DB_USER` / `DB_PASSWORD` | yes* | Used only if `MONGODB_URI` is empty (legacy Atlas URL) |
+| `MONGODB_URI` | yes* | Full connection string. If set, `DB_USER` / `DB_PASSWORD` / `DB_NAME` are ignored |
+| `DB_USER` / `DB_PASSWORD` / `DB_NAME` | yes* | Used when `MONGODB_URI` is empty. `DB_NAME` is the database in the Atlas URI |
 | `JWTKEY` | yes | Access-token secret |
-| `JWT_REFRESH_KEY` | no | Refresh-token secret; falls back to `JWTKEY` |
+| `JWT_REFRESH_KEY` | yes | Refresh-token secret. Separate from `JWTKEY`; refresh is not signed without it |
 | `PASSWORD_SALT` | no | bcrypt rounds, default `10` |
 | `FRONTEND_ORIGIN` | yes in prod | Allowed browser origin for CORS and email links |
 | `API_ORIGIN` | no | Public API origin in OpenAPI (`http://localhost:3001` locally) |
-| `COOKIE_SECURE` | no | Force Secure cookies (`true` / `false`); otherwise inferred from the request |
 | `MAIL_SENDER` | for mail | Gmail address |
 | `MAIL_PASSWORD` | for mail | Gmail app password |
 | `AWS_CONNECT_ACCESS_KEY` | for uploads | S3 access key |
 | `AWS_CONNECT_SECRET_ACCESS_KEY` | for uploads | S3 secret |
 | `AWS_CONNECT_REGION` | for uploads | e.g. `eu-central-1` |
 | `AWS_CONNECT_BUCKET_NAME` | for uploads | Bucket name |
+| `SUPABASE_URL` | yes | Supabase project URL for realtime |
+| `SUPABASE_SECRET_KEY` | yes | Supabase secret key, server only |
+| `SOCKET_JWT_SECRET_KEY` | yes | PEM private key for socket tokens |
+| `SOCKET_JWT_PUBLIC_KEY` | yes | PEM public key for socket tokens |
+| `SOCKET_JWT_KID` | no | Key id on the socket JWT |
 
-\* Provide either `MONGODB_URI` or both `DB_USER` and `DB_PASSWORD`.
+\* Provide either `MONGODB_URI` or all of `DB_USER`, `DB_PASSWORD`, and `DB_NAME`.
 
 ## Scripts
 

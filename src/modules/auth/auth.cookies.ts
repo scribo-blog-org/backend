@@ -4,14 +4,10 @@ export const REFRESH_COOKIE = 'refresh_token';
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 function cookieOptions(req?: Request) {
-    const forced = process.env.COOKIE_SECURE;
     const forwarded = String(req?.headers?.['x-forwarded-proto'] || '')
         .split(',')[0]
         .trim();
-    const secure =
-        forced === 'true' ||
-        (forced !== 'false' &&
-            (forwarded === 'https' || Boolean(req?.secure)));
+    const secure = forwarded === 'https' || Boolean(req?.secure);
     return {
         httpOnly: true,
         secure,

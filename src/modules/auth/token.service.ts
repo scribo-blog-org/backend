@@ -7,6 +7,19 @@ import type { Role } from '../../authz/roles';
 const ACCESS_TTL = '15m';
 const REFRESH_TTL = '30d';
 
+function parseJwk(raw: string): crypto.JsonWebKey {
+    const trimmed = raw.trim();
+    try {
+        return JSON.parse(trimmed) as crypto.JsonWebKey;
+    } catch (error) {
+        const unescaped = trimmed.replace(/\\"/g, '"');
+        if (unescaped === trimmed) {
+            throw error;
+        }
+        return JSON.parse(unescaped) as crypto.JsonWebKey;
+    }
+}
+
 export type AccessUser = {
     _id: unknown;
     email: string;
@@ -23,10 +36,11 @@ export class TokenService {
     }
 
     private refreshKey() {
-        return (
-            this.config.get<string>('JWT_REFRESH_KEY') ||
-            `${this.accessKey()}-refresh`
-        );
+        const key = this.config.get<string>('JWT_REFRESH_KEY')?.trim();
+        if (!key) {
+            throw new Error('Set JWT_REFRESH_KEY');
+        }
+        return key;
     }
 
     encodeAccess(user: AccessUser, sessionId?: string) {
@@ -72,7 +86,7 @@ export class TokenService {
         const kid = this.config.get<string>('SOCKET_JWT_KID');
 
         const privateKey = crypto.createPrivateKey({
-            key: JSON.parse(rawKey),
+            key: parseJwk(rawKey),
             format: 'jwk',
         });
 
@@ -91,7 +105,7 @@ export class TokenService {
         const rawKey = this.config.getOrThrow<string>('SOCKET_JWT_PUBLIC_KEY');
 
         const publicKeyObject = crypto.createPublicKey({
-            key: JSON.parse(rawKey),
+            key: parseJwk(rawKey),
             format: 'jwk',
         });
 
@@ -111,8 +125,9 @@ export class TokenService {
     }
 
     decodeRefresh(token: string) {
+        const key = this.refreshKey();
         try {
-            const decoded = jwt.verify(token, this.refreshKey()) as {
+            const decoded = jwt.verify(token, key) as {
                 id?: string;
                 sessionId?: string;
                 tokenType?: string;

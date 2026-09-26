@@ -1,8 +1,4 @@
-import {
-    BadRequestException,
-    Injectable,
-    NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 
 type PreviewResult = {
     url: string;
@@ -65,18 +61,31 @@ export class LinkPreviewService {
             throw new BadRequestException('Invalid URL');
         }
 
-        const response = await fetch(parsed.href, {
-            headers: {
-                'User-Agent':
-                    'Mozilla/5.0 (compatible; ScriboBot/1.0; +https://scribo-blog.vercel.app)',
-                Accept: 'text/html,application/xhtml+xml',
-            },
-            signal: AbortSignal.timeout(8000),
-            redirect: 'follow',
-        });
+        const fallback: PreviewResult = {
+            url: parsed.href,
+            title: parsed.hostname,
+            description: '',
+            image: null,
+            site_name: parsed.hostname || null,
+        };
+
+        let response: Response;
+        try {
+            response = await fetch(parsed.href, {
+                headers: {
+                    'User-Agent':
+                        'Mozilla/5.0 (compatible; ScriboBot/1.0; +https://scribo-blog.vercel.app)',
+                    Accept: 'text/html,application/xhtml+xml',
+                },
+                signal: AbortSignal.timeout(8000),
+                redirect: 'follow',
+            });
+        } catch {
+            return fallback;
+        }
 
         if (!response.ok) {
-            throw new NotFoundException('Preview unavailable');
+            return fallback;
         }
 
         const html = (await response.text()).slice(0, 250_000);
