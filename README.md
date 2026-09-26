@@ -1,147 +1,152 @@
 # Scribo API
 
-HTTP API for the Scribo blog platform: accounts, posts, comments, search, support, and admin analytics.
+HTTP API блога. Аккаунты, посты, комментарии, поиск, переписка, поддержка и админские данные. Реалтайм этот процесс не держит: события он публикует в Redis, а браузеру их отдаёт сервис `socket`.
 
-Built with **NestJS 11**, **MongoDB (Mongoose)**, and **JWT**. The live frontend is `Scribo_frontend` in the same workspace.
+Прод: `https://scribo-blog.duckdns.org/api`. Рядом в том же хосте живут фронт и сокет; как nginx их разделяет, описано в репозитории `infra`.
 
-## Stack
+## Место в системе
 
-| Layer | Choice |
-| --- | --- |
-| Runtime | Node.js 22 |
-| Framework | NestJS 11 (Express adapter) |
-| Database | MongoDB via Mongoose 9 |
-| Auth | Access JWT (`Authorization: Bearer`) + `refresh_token` httpOnly cookie |
-| Uploads | AWS S3 |
-| Mail | Nodemailer (Gmail) |
-| Docs | OpenAPI 3 / Swagger |
-
-## What it covers
-
-- Email and Google registration / login, email verification codes, password reset
-- Session list, refresh, and logout (refresh cookie)
-- Profiles, follows, saved posts
-- Posts (CRUD, categories, hashtags, cover images, view counting on article fetch)
-- Nested comments
-- Full-text style search over posts and comments, hashtag suggest
-- Support tickets
-- Admin: users/roles, categories, logs, analytics dashboard data
-- RBAC: `user`, `author`, `moderator`, `admin`, `tech_admin`
-
-Every JSON response uses the envelope `{ status, message, data }`. Validation and domain errors follow the same shape.
-
-## Requirements
-
-- Node.js **22.x**
-- MongoDB (Atlas URI or local)
-- Optional: AWS S3 (media), Gmail app password (mail), Google OAuth client on the frontend
-
-## Setup
-
-```bash
-cd Scribo_nest
-cp .env.example .env
-npm install
+```
+браузер  --HTTPS /api-->  nginx  -->  этот процесс :3001
+                                      ├─ MongoDB Atlas
+                                      ├─ S3
+                                      ├─ почта
+                                      └─ Redis publish scribo:events
 ```
 
-Fill `.env`, then:
+Порт 3001 снаружи машины не открыт. Клиент ходит на публичный хост, nginx срезает префикс пути и проксирует его сюда как есть: `/api/posts` на входе nginx остаётся `/api/posts` у Nest.
+
+Старт печатает три строки и больше ничего штатного: Mongo подключена, S3 доступна, порт слушается. Карту маршрутов Nest в лог не пишет. Ошибки и предупреждения остаются.
+
+## Стек
+
+| Слой | Выбор |
+| --- | --- |
+| Runtime | Node.js 22 |
+| Framework | NestJS 11, адаптер Express |
+| База | MongoDB, Mongoose |
+| Доступ | RS256. Access JWT в `Authorization: Bearer`. Refresh — отдельный секрет, httpOnly cookie `refresh_token` |
+| Файлы | AWS S3 |
+| Почта | Nodemailer, Gmail |
+| События | Redis, канал `scribo:events` |
+| Контракт | OpenAPI 3, Swagger |
+
+Каждый JSON-ответ в конверте `{ status, message, data }`. Ошибки валидации и домена имеют ту же форму.
+
+## Что делает API
+
+Регистрация и вход по почте и через Google. Коды подтверждения почты, сброс пароля, список сессий, refresh и выход. Google-логин принимает access token Google и сам ходит в userinfo. Client id живёт на фронте.
+
+Профили, подписки, сохранённые посты. Посты: создание и правка, категории, хештеги, обложка, счётчик просмотров при открытии статьи. Вложенные комментарии. Поиск по постам и комментариям, подсказки хештегов. Превью ссылок. Тикеты поддержки.
+
+Переписка хранится здесь. Новое сообщение и прочтение пишутся в Mongo и публикуются в Redis. Сокет только доставляет событие в комнату `chat:<id>` или `user:<id>`.
+
+Админка: пользователи и роли, категории, журнал действий, сводка аналитики. Роли: `user`, `author`, `moderator`, `admin`, `tech_admin`.
+
+Маршруты по умолчанию требуют access JWT. Публичные помечены `@Public()`. `@OptionalAuth()` отдаёт страницу гостю и всё равно прикладывает пользователя, если токен есть. Так устроен просмотр статьи.
+
+На чувствительных маршрутах стоит лимит. Лимит просмотра не отвечает 429: просмотр просто не увеличивается.
+
+## Требования
+
+Node.js 22. MongoDB, Atlas или локальная. Для загрузок — S3. Для писем — пароль приложения Gmail. Для событий — Redis. На проде Redis поднимает compose из `infra`.
+
+## Локальный запуск
 
 ```bash
+cp .env.example .env
+npm install
 npm run start:dev
 ```
 
-Default listen address: `http://localhost:3001`.
+Слушает `http://localhost:3001`.
 
-| Check | URL |
+| Проверка | URL |
 | --- | --- |
-| Health (no `/api` prefix) | `GET /health` |
+| Health, без префикса `/api` | `GET /health` |
 | Ping | `GET /api` |
-| OpenAPI JSON (app envelope) | `GET /api/docs` |
+| OpenAPI в конверте приложения | `GET /api/docs` |
 | Swagger UI | `GET /api/swagger` |
-| Raw OpenAPI JSON | `GET /api/docs-json` |
+| Сырой OpenAPI | `GET /api/docs-json` |
 
-Pair with the frontend: set `FRONTEND_ORIGIN` to the Vite origin (usually `http://localhost:3000`) and set the frontend `VITE_APP_API_URL` to `http://localhost:3001`. CORS allows `FRONTEND_ORIGIN`, `*.vercel.app`, and local `http://localhost` / `http://127.0.0.1` when not in production.
+`FRONTEND_ORIGIN` должен совпадать с origin фронта. Локально это обычно `http://localhost:3000`. В проде — `https://scribo-blog.duckdns.org`. CORS пускает этот origin. В не-production дополнительно пускает localhost.
 
-## Environment
+## Окружение
 
-Copy `.env.example`. Do not commit `.env`.
+Файл `.env` не коммитится. Образец — `.env.example`.
 
-| Variable | Required | Notes |
+| Переменная | Обязательна | Смысл |
 | --- | --- | --- |
-| `PORT` | no | Default `3001` |
-| `MONGODB_URI` | yes* | Full connection string. If set, the `DB_*` parts below are ignored |
-| `DB_USER` / `DB_PASSWORD` / `DB_HOST` / `DB_NAME` | yes* | Used when `MONGODB_URI` is empty. `DB_HOST` is the cluster host only, for example `scribo.xxxx.mongodb.net` |
-| `JWTKEY` | yes | Access-token secret |
-| `JWT_REFRESH_KEY` | yes | Refresh-token secret. Separate from `JWTKEY`; refresh is not signed without it |
-| `PASSWORD_SALT` | no | bcrypt rounds, default `10` |
-| `FRONTEND_ORIGIN` | yes in prod | Allowed browser origin for CORS and email links |
-| `API_ORIGIN` | no | Public API origin in OpenAPI (`http://localhost:3001` locally) |
-| `MAIL_SENDER` | for mail | Gmail address |
-| `MAIL_PASSWORD` | for mail | Gmail app password |
-| `AWS_CONNECT_ACCESS_KEY` | for uploads | S3 access key |
-| `AWS_CONNECT_SECRET_ACCESS_KEY` | for uploads | S3 secret |
-| `AWS_CONNECT_REGION` | for uploads | e.g. `eu-central-1` |
-| `AWS_CONNECT_BUCKET_NAME` | for uploads | Bucket name |
-| `REDIS_URL` | yes | Redis bus for realtime events, `redis://127.0.0.1:6379` from the host |
+| `PORT` | нет | По умолчанию `3001` |
+| `MONGODB_URI` | да* | Полная строка. Если задана, части `DB_*` не используются |
+| `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_NAME` | да* | Когда `MONGODB_URI` пустой. `DB_HOST` — только хост кластера |
+| `JWT_PRIVATE_KEY` | да | Закрытый ключ RS256, PEM. Им подписывается access token |
+| `JWT_PUBLIC_KEY` | да | Открытый ключ RS256. Им API проверяет access token. Тот же ключ получает socket |
+| `JWT_REFRESH_KEY` | да | Отдельный секрет refresh. Без него refresh не подписывается |
+| `PASSWORD_SALT` | нет | Раунды bcrypt, по умолчанию `10` |
+| `FRONTEND_ORIGIN` | да в проде | CORS и ссылки в письмах, без слэша на конце |
+| `API_ORIGIN` | нет | Публичный origin в OpenAPI |
+| `MAIL_SENDER`, `MAIL_PASSWORD` | для почты | Ящик Gmail и пароль приложения |
+| `AWS_CONNECT_ACCESS_KEY`, `AWS_CONNECT_SECRET_ACCESS_KEY`, `AWS_CONNECT_REGION`, `AWS_CONNECT_BUCKET_NAME` | для загрузок | S3 |
+| `REDIS_URL` | да | С хоста `redis://127.0.0.1:6379`. В compose `redis://redis:6379` |
 
-\* Provide either `MONGODB_URI` or all of `DB_USER`, `DB_PASSWORD`, `DB_HOST`, and `DB_NAME`.
+\* Либо `MONGODB_URI`, либо все четыре `DB_*`.
 
-## Scripts
+Закрытый ключ и секрет refresh на сокет не передаются. Сокет умеет только проверять access token открытым ключом.
+
+## Скрипты
 
 ```bash
-npm run start:dev    # watch
-npm run start        # once
-npm run start:prod   # node dist/main (after build)
+npm run start:dev
+npm run start
+npm run start:prod
 npm run build
-npm run lint         # ESLint --fix
+npm run lint
 npm run lint:check
-npm run format       # Prettier
-npm run test         # unit (Jest)
+npm run test
 npm run test:e2e
 npm run test:cov
 ```
 
-## Layout
+## Как устроен код
 
 ```
 src/
-  main.ts                 bootstrap
-  create-app.ts           CORS, cookies, validation, Swagger
+  main.ts              старт, проверка Mongo и S3, порт
+  create-app.ts        CORS, cookie, валидация, Swagger
   app.module.ts
-  authz/                  JWT guard, permissions, roles
-  http/                   envelope, errors, validation pipe, OpenAPI, rate limit
-  visitor/                client IP, geo, device
-  validation/             field limits and DTO rules
-  infra/                  mail, S3, app log, startup checks
-  config/                 env checks, Mongo URI, JWT keys
-  database/               Mongoose module + schemas
+  authz/               guard JWT, роли, права
+  http/                конверт ответа, ошибки, лимиты
+  visitor/             IP, гео, устройство
+  validation/          лимиты полей и DTO
+  infra/               почта, S3, журнал в Mongo, проверки старта
+  config/              env, URI Mongo, ключи JWT
+  database/            Mongoose и схемы
+  socket/              публикация событий в Redis
   modules/
-    auth/                 register, login, sessions, reset
-    users/                admin user + role APIs
+    auth/              регистрация, вход, сессии, сброс
+    users/             пользователи и роли
     profile/
     categories/
-    posts/                posts + comments
+    posts/             посты и комментарии
     search/
     support/
     logs/
     analytics/
+    notifications/
+    chat/
+    link-preview/
 ```
 
-Guards: routes are authenticated by default. Mark public handlers with `@Public()`; use `@OptionalAuth()` when a view should work for guests but still attach a user when a token is present (article views).
+## Сессия для клиента
 
-## Auth (clients)
+1. Вход и регистрация возвращают `accessToken` в `data` и ставят cookie `refresh_token`.
+2. Обычные запросы идут с `Authorization: Bearer <accessToken>`.
+3. `POST /api/auth/refresh` идёт с cookie, `credentials: include`.
+4. Google-вход присылает `googleToken`.
 
-1. Login/register returns `accessToken` in `data` and sets `refresh_token` (httpOnly).
-2. Send `Authorization: Bearer <accessToken>` on API calls.
-3. Send cookies (`credentials: include`) on `POST /api/auth/refresh`.
-4. Google login sends the Google access token as `googleToken`; the API calls Google userinfo. The OAuth client id lives on the frontend.
+За reverse proxy включён `trust proxy`: Secure cookie и реальный IP клиента берутся из заголовков nginx.
 
-Rate limits apply to sensitive routes (auth, views). Hitting a view-rate limit skips the increment instead of returning 429.
+## Выкладка
 
-## Production notes
-
-- Set `NODE_ENV=production` (or Vercel production). Localhost CORS shortcuts are then off.
-- `trust proxy` is enabled so Secure cookies and client IP work behind Vercel / a reverse proxy.
-- Keep JWT secrets and Mongo credentials only in the host’s env store.
-
-The older Express app in `Scribo_backend` is not this API.
+Push в `master` собирает образ `ghcr.io/scribo-blog-org/backend`, теги `latest` и sha, и по SSH поднимает сервис `backend` в `/opt/scribo`. Pull request в `master` гоняет lint, test и `docker build` без публикации. Подробности машины — в `infra`.
