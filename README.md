@@ -69,8 +69,8 @@ Copy `.env.example`. Do not commit `.env`.
 | Variable | Required | Notes |
 | --- | --- | --- |
 | `PORT` | no | Default `3001` |
-| `MONGODB_URI` | yes* | Full connection string. If set, `DB_USER` / `DB_PASSWORD` / `DB_NAME` are ignored |
-| `DB_USER` / `DB_PASSWORD` / `DB_NAME` | yes* | Used when `MONGODB_URI` is empty. `DB_NAME` is the database in the Atlas URI |
+| `MONGODB_URI` | yes* | Full connection string. If set, the `DB_*` parts below are ignored |
+| `DB_USER` / `DB_PASSWORD` / `DB_HOST` / `DB_NAME` | yes* | Used when `MONGODB_URI` is empty. `DB_HOST` is the cluster host only, for example `scribo.xxxx.mongodb.net` |
 | `JWTKEY` | yes | Access-token secret |
 | `JWT_REFRESH_KEY` | yes | Refresh-token secret. Separate from `JWTKEY`; refresh is not signed without it |
 | `PASSWORD_SALT` | no | bcrypt rounds, default `10` |
@@ -88,7 +88,7 @@ Copy `.env.example`. Do not commit `.env`.
 | `SOCKET_JWT_PUBLIC_KEY` | yes | PEM public key for socket tokens |
 | `SOCKET_JWT_KID` | no | Key id on the socket JWT |
 
-\* Provide either `MONGODB_URI` or all of `DB_USER`, `DB_PASSWORD`, and `DB_NAME`.
+\* Provide either `MONGODB_URI` or all of `DB_USER`, `DB_PASSWORD`, `DB_HOST`, and `DB_NAME`.
 
 ## Scripts
 
