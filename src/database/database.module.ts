@@ -16,7 +16,12 @@ import {
     SupportRequestSchema,
 } from './schemas/support-request.schema';
 import { AppLog, AppLogSchema } from './schemas/log.schema';
-import { PageView, PageViewSchema } from './schemas/page-view.schema';
+import {
+    VisitDay,
+    VisitDaySchema,
+    VisitHour,
+    VisitHourSchema,
+} from './schemas/visit-bucket.schema';
 import {
     SearchQueryLog,
     SearchQueryLogSchema,
@@ -56,7 +61,8 @@ import { ChatMessage, ChatMessageSchema } from './schemas/chat-message.schema';
             { name: PostComment.name, schema: PostCommentSchema },
             { name: SupportRequest.name, schema: SupportRequestSchema },
             { name: AppLog.name, schema: AppLogSchema },
-            { name: PageView.name, schema: PageViewSchema },
+            { name: VisitDay.name, schema: VisitDaySchema },
+            { name: VisitHour.name, schema: VisitHourSchema },
             { name: SearchQueryLog.name, schema: SearchQueryLogSchema },
             { name: Conversation.name, schema: ConversationSchema },
             { name: ChatMessage.name, schema: ChatMessageSchema },
