@@ -89,4 +89,5 @@ jobs:
           script: |
             cd /opt/scribo &&
             docker compose pull backend &&
-            docker compose up -d backend
+            docker compose up -d backend &&
+            docker image prune -f
