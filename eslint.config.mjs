@@ -25,6 +25,16 @@ export default tseslint.config(
     eslintPluginPrettierRecommended,
 
     {
+        files: ["src/**/*.mjs"],
+        languageOptions: {
+            globals: {
+                ...globals.node
+            },
+            sourceType: "module"
+        }
+    },
+
+    {
         files: ["src/**/*.ts"],
         languageOptions: {
             globals: {
