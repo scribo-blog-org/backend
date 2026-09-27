@@ -3,6 +3,8 @@ import {
     Controller,
     Delete,
     Get,
+    HttpCode,
+    HttpStatus,
     Param,
     Post,
     Req,
@@ -53,6 +55,7 @@ export class AuthController {
 
     @Public()
     @Post('verification/google')
+    @HttpCode(HttpStatus.OK)
     @ApiOperation({
         summary:
             'Check Google token and whether the email is already registered',
@@ -191,6 +194,7 @@ export class AuthController {
 
     @Public()
     @Post('login/google')
+    @HttpCode(HttpStatus.OK)
     @ApiOperation({ summary: 'Login with Google access token' })
     async loginGoogle(
         @Body() dto: LoginGoogleDto,
