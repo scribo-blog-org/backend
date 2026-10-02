@@ -2,7 +2,7 @@ import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import path from 'path';
 import { fieldError } from '../http/http-errors';
-import { uploadsPublicUrl } from './files.config';
+import { UPLOADS_URL_PATH, uploadsPublicUrl } from './files.config';
 import { FilesDisk } from './files.disk';
 import { ALLOWED_IMAGE_MIME_TYPES, UPLOAD_LIMIT_SIZE } from './upload';
 
@@ -61,20 +61,56 @@ export class FilesService {
                 'Error to upload image to storage!',
             );
         }
-        return `${this.publicUrl}/${key}`;
+        return `${UPLOADS_URL_PATH}/${key}`;
     }
 
-    /** Удаляет файл по ссылке. Чужие и старые (S3) ссылки игнорируются. */
+    /**
+     * Удаляет файл по пути из базы (`/uploads/...`) или по старой абсолютной
+     * ссылке на тот же путь. Чужие адреса, включая S3, игнорируются.
+     */
     async remove(url?: string | null): Promise<boolean> {
-        if (!url?.startsWith(`${this.publicUrl}/`)) return false;
+        const key = uploadKey(url);
+        if (!key) return false;
         try {
-            const key = decodeURIComponent(
-                url.slice(this.publicUrl.length + 1),
-            );
             await this.disk.remove(key);
             return true;
         } catch {
             return false;
         }
     }
+}
+
+/** Ключ на диске из пути `/uploads/...`. Домен в ссылке не важен. */
+function uploadKey(url?: string | null): string | null {
+    if (!url) return null;
+    let pathname: string;
+    if (url.startsWith('/')) {
+        try {
+            pathname = new URL(url, 'http://localhost').pathname;
+        } catch {
+            return null;
+        }
+    } else {
+        try {
+            const parsed = new URL(url);
+            if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+                return null;
+            }
+            pathname = parsed.pathname;
+        } catch {
+            return null;
+        }
+    }
+    const prefix = `${UPLOADS_URL_PATH}/`;
+    if (!pathname.startsWith(prefix)) return null;
+    let key: string;
+    try {
+        key = decodeURIComponent(pathname.slice(prefix.length));
+    } catch {
+        return null;
+    }
+    if (!key || key.split('/').some((part) => part === '..' || part === '')) {
+        return null;
+    }
+    return key;
 }

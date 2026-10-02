@@ -13,7 +13,8 @@ export function uploadsDir(config: Env): string {
 
 /**
  * Адрес каталога загрузок снаружи, без слэша в конце. В базе хранится
- * `<база>/<ключ>`, поэтому смена домена требует миграции ссылок.
+ * только путь `/uploads/<ключ>`, без домена. Этот адрес нужен снаружи,
+ * чтобы собрать полную ссылку: origin окружения плюс путь из базы.
  */
 export function uploadsPublicUrl(config: Env): string {
     const explicit = config.get<string>('UPLOADS_PUBLIC_URL')?.trim();

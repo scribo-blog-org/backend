@@ -37,7 +37,7 @@ describe('FilesService', () => {
             'userAvatar',
         );
 
-        expect(url).toBe('https://example.test/uploads/src/avatar/u1.png');
+        expect(url).toBe('/uploads/src/avatar/u1.png');
         const target = path.join(dir, 'src/avatar/u1.png');
         expect(existsSync(target)).toBe(true);
         expect(statSync(target).mode & 0o777).toBe(0o644);
@@ -66,10 +66,22 @@ describe('FilesService', () => {
         expect(existsSync(path.join(dir, 'src/avatar/u1.png'))).toBe(false);
     });
 
+    it('removes a file stored under an older absolute url', async () => {
+        await files.saveImage(image(), 'avatar', 'u1', 'userAvatar');
+
+        expect(
+            await files.remove(
+                'https://old.example/uploads/src/avatar/u1.png',
+            ),
+        ).toBe(true);
+        expect(existsSync(path.join(dir, 'src/avatar/u1.png'))).toBe(false);
+    });
+
     it('ignores foreign urls and path traversal', async () => {
         expect(await files.remove('https://b.s3.amazonaws.com/src/a.jpg')).toBe(
             false,
         );
+        expect(await files.remove('/uploads/../../etc/passwd')).toBe(false);
         expect(
             await files.remove('https://example.test/uploads/../../etc/passwd'),
         ).toBe(false);
