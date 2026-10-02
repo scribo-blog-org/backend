@@ -249,22 +249,61 @@ if [ -f "${root}/fail-on-$n" ]; then echo "boom mongodb+srv://u:secret@h/db" >&2
         expect(restore['job']!.error).toMatch(/rollback failed.*manually/);
     });
 
-    it('keeps only the configured number of safety snapshots', async () => {
+    it('removes the safety snapshot once the restore has succeeded', async () => {
         const record = await makeBackup();
         await restore.start(record._id, null);
         await idle();
+
+        expect(restore['job']).toMatchObject({ status: 'success' });
+        const snapshot = model.docs.find((d) => d.kind === 'pre_restore')!;
+        expect(snapshot.file_removed_reason).toBe('restored');
+        expect(snapshot.file_removed_at).toBeTruthy();
+        expect(
+            readdirSync(dir).filter((n) => n.startsWith('scribo-pre-restore-')),
+        ).toEqual([]);
+        // Запись о снимке остаётся в истории, откат помнит, что он был.
+        expect((await readState(dir)).last_restore!.safety_backup_id).toBe(
+            snapshot._id,
+        );
+        expect(
+            logger.log.mock.calls.find(
+                ([e]) => e.type === 'backup_restore_result',
+            )![0].data,
+        ).toMatchObject({ safety_removed: true });
+    });
+
+    it('keeps the safety snapshot when the restore fails', async () => {
+        const record = await makeBackup();
+        writeFileSync(path.join(root, 'fail-on-1'), '');
         await restore.start(record._id, null);
         await idle();
-        // Каждый бекап/откат прунит после себя: запускаем ещё один бекап.
-        await makeBackup();
+
+        expect(restore['job']).toMatchObject({ status: 'failed' });
+        expect(
+            readdirSync(dir).filter((n) => n.startsWith('scribo-pre-restore-')),
+        ).toHaveLength(1);
+        expect(
+            model.docs.find((d) => d.kind === 'pre_restore')!.file_removed_at,
+        ).toBeFalsy();
+    });
+
+    it('never keeps more than one safety snapshot', async () => {
+        const record = await makeBackup();
+        // Первый откат падает на шаге 1, возврат на шаге 2. Второй так же на 3 и 4.
+        writeFileSync(path.join(root, 'fail-on-1'), '');
+        await restore.start(record._id, null);
+        await idle();
+        await new Promise((r) => setTimeout(r, 1100));
+        writeFileSync(path.join(root, 'fail-on-3'), '');
+        await restore.start(record._id, null);
+        await idle();
 
         const snapshots = model.docs.filter((d) => d.kind === 'pre_restore');
         expect(snapshots).toHaveLength(2);
         expect(snapshots.filter((s) => !s.file_removed_at)).toHaveLength(1);
-        const left = readdirSync(dir).filter((n) =>
-            n.startsWith('scribo-pre-restore-'),
-        );
-        expect(left).toHaveLength(1);
+        expect(
+            readdirSync(dir).filter((n) => n.startsWith('scribo-pre-restore-')),
+        ).toHaveLength(1);
     });
 
     it('is off unless explicitly enabled, and only for archives with a manifest', async () => {
@@ -281,12 +320,41 @@ if [ -f "${root}/fail-on-$n" ]; then echo "boom mongodb+srv://u:secret@h/db" >&2
         );
     });
 
-    it('refuses a backup of another database', async () => {
+    it('refuses a backup with another data version and says so in the list', async () => {
         const record = await makeBackup();
-        record.contents.db_name = 'other';
+        record.contents.db_version = '0.1';
         await expect(restore.start(record._id, null)).rejects.toThrow(
-            '"other"',
+            /data version 0\.1/,
         );
+
+        const { items } = await backups.list({});
+        expect(items[0]).toMatchObject({ can_restore: false });
+        expect(items[0].restore_blocked).toMatch(/data version 0\.1/);
+    });
+
+    it('records the data version in the manifest and the history', async () => {
+        const record = await makeBackup();
+        const raw = execFileSync('tar', [
+            '-xOf',
+            path.join(dir, record.file_name),
+            'manifest.json',
+        ]);
+        const manifest = JSON.parse(raw.toString());
+        expect(manifest.db.version).toBe(backups.currentDbVersion());
+        expect(manifest.app_version).toBe(record.contents.app_version);
+        expect(record.contents.db_version).toBe(backups.currentDbVersion());
+    });
+
+    it('stamps the restored database with the current backend version', async () => {
+        const record = await makeBackup();
+        connection.meta.set('db', { version: '0.1', app_version: '0.1.0' });
+        await restore.start(record._id, null);
+        await idle();
+
+        expect(restore['job']).toMatchObject({ status: 'success' });
+        expect(connection.meta.get('db')).toMatchObject({
+            version: backups.currentDbVersion(),
+        });
     });
 
     it('does not run next to a backup or a second restore', async () => {

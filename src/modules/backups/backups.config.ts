@@ -19,6 +19,10 @@ export type BackupsConfig = {
     keepMonths: number;
     /** Сколько страховочных снимков перед откатом хранить. */
     keepPreRestore: number;
+    /** Сколько загруженных вручную архивов хранить. */
+    keepUploaded: number;
+    /** Самый большой архив, который принимает загрузка, в байтах. */
+    uploadMaxBytes: number;
     uploadsDir: string;
     tar: string;
 };
@@ -59,8 +63,16 @@ export function backupsConfig(config: Env): BackupsConfig {
         keepMonths: positiveInt(config.get<string>('BACKUP_KEEP_MONTHS'), 12),
         keepPreRestore: positiveInt(
             config.get<string>('BACKUP_KEEP_PRE_RESTORE'),
+            1,
+        ),
+        keepUploaded: positiveInt(
+            config.get<string>('BACKUP_KEEP_UPLOADED'),
             3,
         ),
+        uploadMaxBytes:
+            positiveInt(config.get<string>('BACKUP_UPLOAD_MAX_MB'), 2048) *
+            1024 *
+            1024,
         uploadsDir: uploadsDir(config),
         tar: config.get<string>('TAR_BIN')?.trim() || 'tar',
     };

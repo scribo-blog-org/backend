@@ -95,7 +95,9 @@ export async function configureScriboApp(
         credentials: true,
         methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
         allowedHeaders: ['Content-Type', 'Authorization'],
-        exposedHeaders: ['Set-Cookie'],
+        // Content-Disposition нужен, чтобы фронтенд при другом origin видел имя
+        // скачиваемого бекапа, иначе файл сохраняется как backup.gz.
+        exposedHeaders: ['Set-Cookie', 'Content-Disposition'],
         optionsSuccessStatus: 200,
     });
 

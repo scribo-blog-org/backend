@@ -6,11 +6,15 @@ import {
 } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import { randomBytes } from 'crypto';
-import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'fs/promises';
+import { cp, mkdir, readdir, rm, writeFile } from 'fs/promises';
 import { Connection } from 'mongoose';
 import path from 'path';
 import { redact, uriWithoutDb } from './backups.config';
-import { LoggerService } from '../../infra/logger.service';
+import {
+    actorFields,
+    LoggerService,
+    type LogActor,
+} from '../../infra/logger.service';
 import { BackupsService } from './backups.service';
 import {
     readLock,
@@ -20,15 +24,12 @@ import {
     writeLock,
     type RestoreOutcome,
 } from './backups.state';
-import {
-    MANIFEST_FILE,
-    MONGO_ARCHIVE,
-    dirStats,
-    parseManifest,
-    sha256File,
-    type Manifest,
-} from './manifest';
+import { verifyArchive } from './archive';
+import { incompatibility, syncDbMeta } from './db-version';
+import { MONGO_ARCHIVE, appVersion, type Manifest } from './manifest';
 import { runProcess } from './run-process';
+
+const MAX_ENTRIES = 500_000;
 
 export type RestorePhase =
     'verifying' | 'snapshot' | 'database' | 'files' | 'rollback';
@@ -96,7 +97,7 @@ export class BackupRestoreService implements OnModuleInit {
         };
     }
 
-    async start(id: string, userId: string | null) {
+    async start(id: string, userId: string | null, author?: LogActor) {
         const cfg = this.archives.settings;
         if (!cfg.restoreEnabled) {
             throw new ConflictException('Restore is disabled');
@@ -115,10 +116,12 @@ export class BackupRestoreService implements OnModuleInit {
                 'This archive has no manifest, it cannot be restored',
             );
         }
-        if (record.contents.db_name !== this.connection.name) {
-            throw new ConflictException(
-                `The backup is of database "${record.contents.db_name}", the current one is "${this.connection.name}"`,
+        if (record.contents.db_version !== undefined) {
+            const mismatch = incompatibility(
+                record.contents.db_version,
+                this.archives.currentDbVersion(),
             );
+            if (mismatch) throw new ConflictException(mismatch);
         }
         if (!this.archives.acquire('restore')) {
             throw new ConflictException(
@@ -136,11 +139,16 @@ export class BackupRestoreService implements OnModuleInit {
             rolled_back: false,
         };
         this.job = job;
-        void this.run(job, userId);
+        void this.run(job, userId, author, record.source_id ?? job.backup_id);
         return job;
     }
 
-    private async run(job: RestoreJob, userId: string | null) {
+    private async run(
+        job: RestoreJob,
+        userId: string | null,
+        author: LogActor | undefined,
+        manifestId: string,
+    ) {
         const file = this.archives.pathOf(job.file_name);
         const work = this.archives.pathOf(
             `.restore-${randomBytes(6).toString('hex')}`,
@@ -158,13 +166,18 @@ export class BackupRestoreService implements OnModuleInit {
                 restored_by: userId,
                 safety_backup_id: null,
             });
-            manifest = await this.extractAndVerify(file, work, job.backup_id);
+            manifest = await this.extractAndVerify(file, work, manifestId);
 
             job.phase = 'snapshot';
             const safety = await this.archives.snapshot(userId ?? undefined);
             safetyId = String(safety._id);
             const fresh = await this.archives.findRecord(safetyId);
             safetyFile = fresh?.file_name ?? null;
+            // Снимок должен быть один: старые от прошлых неудачных откатов
+            // уже не нужны, пока есть свежий.
+            await this.archives
+                .prune()
+                .catch((e) => console.error('backup prune failed', e));
             await writeLock(this.dir, {
                 backup_id: job.backup_id,
                 file_name: job.file_name,
@@ -234,20 +247,44 @@ export class BackupRestoreService implements OnModuleInit {
                     : undefined,
             ).catch((e) => console.error('restore state not saved', e));
             await removeLock(this.dir);
+            if (!error) {
+                // База принесла запись о версии из архива, а работает с ней
+                // эта версия backend.
+                await syncDbMeta(this.connection, appVersion()).catch((e) =>
+                    console.error('database version was not synced', e),
+                );
+            }
+            // Откат удался, возвращаться некуда: снимок только занимает место.
+            // После неудачного отката он остаётся: по нему восстанавливают вручную.
+            let safetyRemoved = false;
+            if (!error && safetyId) {
+                safetyRemoved = await this.archives
+                    .discardSnapshot(safetyId)
+                    .then(() => true)
+                    .catch((e) => {
+                        console.error('safety snapshot not removed', e);
+                        return false;
+                    });
+            }
             await this.logger.log({
                 type: 'backup_restore_result',
                 message: error
                     ? `Restore of ${job.file_name} failed${job.rolled_back ? ' (rolled back)' : ''}: ${error}`
                     : `Restore of ${job.file_name} finished`,
                 data: {
-                    system: true,
+                    ...(author
+                        ? actorFields(author)
+                        : {
+                              system: true,
+                              ...(userId ? { user: userId } : {}),
+                          }),
                     backup: job.backup_id,
                     file_name: job.file_name,
                     status: error ? 'failed' : 'success',
                     rolled_back: job.rolled_back,
                     safety_backup: safetyId,
+                    safety_removed: safetyRemoved,
                     error,
-                    ...(userId ? { user: userId } : {}),
                 },
             });
             this.archives.release();
@@ -255,44 +292,19 @@ export class BackupRestoreService implements OnModuleInit {
     }
 
     /** Распаковывает архив и сверяет его с манифестом. Ничего не заменяет. */
-    private async extractAndVerify(
+    private extractAndVerify(
         file: string,
         work: string,
         expectedId: string,
     ): Promise<Manifest> {
-        await mkdir(work, { recursive: true, mode: 0o700 });
-        await runProcess(this.archives.settings.tar, ['-xf', file, '-C', work]);
-        const manifest = parseManifest(
-            await readFile(path.join(work, MANIFEST_FILE), 'utf8'),
-        );
-        if (manifest.id !== expectedId) {
-            throw new Error('The manifest belongs to a different backup');
-        }
-        if (manifest.db.name !== this.connection.name) {
-            throw new Error(
-                `The backup is of database "${manifest.db.name}", the current one is "${this.connection.name}"`,
-            );
-        }
-        const dump = path.join(work, MONGO_ARCHIVE);
-        const dumpSize = await stat(dump)
-            .then((s) => s.size)
-            .catch(() => -1);
-        if (dumpSize !== manifest.db.bytes) {
-            throw new Error('The database dump is missing or has a wrong size');
-        }
-        if ((await sha256File(dump)) !== manifest.db.sha256) {
-            throw new Error('The database dump checksum does not match');
-        }
-        const uploads = await dirStats(path.join(work, manifest.uploads.dir));
-        if (
-            uploads.files !== manifest.uploads.files ||
-            uploads.bytes !== manifest.uploads.bytes
-        ) {
-            throw new Error(
-                'The uploads in the archive do not match the manifest',
-            );
-        }
-        return manifest;
+        return verifyArchive({
+            tar: this.archives.settings.tar,
+            file,
+            work,
+            dbVersion: this.archives.currentDbVersion(),
+            expectedId,
+            limits: { maxEntries: MAX_ENTRIES, maxBytes: Infinity },
+        });
     }
 
     private async install(work: string, manifest: Manifest, job: RestoreJob) {
@@ -304,7 +316,11 @@ export class BackupRestoreService implements OnModuleInit {
 
     private async restoreDatabase(work: string, manifest: Manifest) {
         const cfg = this.archives.settings;
+        // Архив можно снять в одной базе и поставить в другую (стейдж в
+        // локальную, прод в стейдж): ставим всегда в ту, к которой подключён
+        // backend, с переименованием, если имена разные.
         const db = manifest.db.name;
+        const target = this.connection.name;
         const conf = this.archives.pathOf(
             `.uri.${randomBytes(6).toString('hex')}`,
         );
@@ -322,7 +338,11 @@ export class BackupRestoreService implements OnModuleInit {
                 '--drop',
                 `--nsInclude=${db}.*`,
                 // История бекапов остаётся как есть: иначе откат её стёр бы.
+                // Фильтры работают по исходным именам, переименование после них.
                 `--nsExclude=${db}.backups`,
+                ...(db === target
+                    ? []
+                    : [`--nsFrom=${db}.$col$`, `--nsTo=${target}.$col$`]),
                 '--stopOnError',
                 '--numParallelCollections=1',
             ]);

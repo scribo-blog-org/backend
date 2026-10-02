@@ -7,6 +7,9 @@ function matches(doc: Doc, filter: Doc) {
         if (want && typeof want === 'object' && '$ne' in want) {
             return doc[key] !== want.$ne;
         }
+        if (want && typeof want === 'object' && '$nin' in want) {
+            return !want.$nin.includes(doc[key]);
+        }
         return (doc[key] ?? null) === want;
     });
 }
@@ -86,10 +89,27 @@ export function fakeLogger() {
 
 export function fakeConnection(collections: string[] = ['users', 'posts']) {
     const names = [...collections];
+    const meta = new Map<string, Doc>();
     return {
         names,
+        meta,
         name: 'scribo',
         db: {
+            collection: () => ({
+                findOne: ({ _id }: Doc) =>
+                    Promise.resolve(meta.get(_id) ?? null),
+                updateOne: (
+                    { _id }: Doc,
+                    update: { $set: Doc; $setOnInsert?: Doc },
+                ) => {
+                    meta.set(_id, {
+                        ...(meta.has(_id) ? {} : update.$setOnInsert),
+                        ...meta.get(_id),
+                        ...update.$set,
+                    });
+                    return Promise.resolve({});
+                },
+            }),
             listCollections: () => ({
                 toArray: () => Promise.resolve(names.map((name) => ({ name }))),
             }),

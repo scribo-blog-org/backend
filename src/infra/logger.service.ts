@@ -8,7 +8,20 @@ export type LogActor = {
     id: string;
     nick_name?: string | null;
     role?: string | null;
+    avatar?: string | null;
 };
+
+/**
+ * Снимок автора для записи лога: данные для плашки пользователя. Аккаунт и
+ * его аватар потом могут измениться или пропасть, а запись должна выглядеть
+ * так же, как в момент действия.
+ */
+export const actorFields = (actor: LogActor) => ({
+    user: actor.id,
+    user_nick: actor.nick_name ?? null,
+    user_role: actor.role ?? null,
+    user_avatar: actor.avatar ?? null,
+});
 
 const ERROR_REPEAT_MS = 60_000;
 const ERROR_BUDGET_PER_MINUTE = 30;
@@ -66,9 +79,7 @@ export class LoggerService {
             type,
             message: message ?? `User ${actor.nick_name ?? actor.id}: ${type}`,
             data: {
-                user: actor.id,
-                user_nick: actor.nick_name ?? null,
-                user_role: actor.role ?? null,
+                ...actorFields(actor),
                 ...data,
             },
         });

@@ -25,7 +25,7 @@ describe('LoggerService', () => {
         const { logger, created } = setup();
         await logger.action(
             'like_post',
-            { id: 'u1', nick_name: 'anna' },
+            { id: 'u1', nick_name: 'anna', avatar: 'a.png' },
             { post: 'p1', post_title: 'Hello' },
         );
         expect(created[0]).toMatchObject({
@@ -33,6 +33,7 @@ describe('LoggerService', () => {
             data: {
                 user: 'u1',
                 user_nick: 'anna',
+                user_avatar: 'a.png',
                 post: 'p1',
                 post_title: 'Hello',
             },
