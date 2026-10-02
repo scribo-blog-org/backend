@@ -29,6 +29,21 @@ export class Backup {
     @Prop({ type: Date, default: null })
     finished_at?: Date | null;
 
+    /** `pre_restore`: страховочный снимок перед откатом. Для него правило «один файл на день» не действует. */
+    @Prop({ type: String, enum: ['daily', 'pre_restore'], default: 'daily' })
+    kind!: 'daily' | 'pre_restore';
+
+    /** Из манифеста: что в архиве. Нет у архивов старого формата, их откатом не ставим. */
+    @Prop({ type: Object, default: null })
+    contents?: {
+        db_name: string;
+        collections: number;
+        db_bytes: number;
+        uploads_files: number;
+        uploads_bytes: number;
+        based_on: string | null;
+    } | null;
+
     /** День по UTC (ГГГГ-ММ-ДД). За один день хранится один файл. */
     @Prop({ type: String, required: true })
     day!: string;
