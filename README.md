@@ -88,7 +88,7 @@ npm run start:dev
 | `API_ORIGIN` | нет | Публичный origin в OpenAPI |
 | `MAIL_SENDER`, `MAIL_PASSWORD` | для почты | Ящик Gmail и пароль приложения |
 | `UPLOADS_DIR` | нет | Каталог загрузок, по умолчанию `./uploads`. В Docker это `/app/uploads`, папка окружения на хосте |
-| `UPLOADS_PUBLIC_URL` | нет | Публичный адрес каталога, по умолчанию `<API_ORIGIN>/uploads` |
+| `UPLOADS_PUBLIC_URL` | нет | Публичный адрес каталога для логов, по умолчанию `<API_ORIGIN>/uploads`. В базе домен не хранится |
 | `SERVE_UPLOADS` | нет | `true`/`false`: отдавать ли `/uploads` из Node. По умолчанию включено вне production |
 | `BACKUP_ENABLED` | нет | `true` включает бекапы (расписание и кнопка в админке), по умолчанию выключены |
 | `BACKUPS_DIR` | нет | Каталог архивов, по умолчанию `./backups`. В Docker это `/app/backups`, папка окружения на хосте |
@@ -106,7 +106,7 @@ npm run start:dev
 
 Работа с файлами вынесена в слой `src/files`, как база в `src/database`. Сервисы приложения зовут только `FilesService.saveImage(...)` и `FilesService.remove(url)`; где и как файлы лежат, знает только этот слой (`FilesDisk` пишет на диск, `files.config.ts` считает пути и ссылки).
 
-Аватары и картинки постов лежат в `UPLOADS_DIR/src/avatar` и `UPLOADS_DIR/src/featured_image` (файлы 644, каталоги 755). В базе хранится публичная ссылка `<UPLOADS_PUBLIC_URL>/src/...`, по умолчанию `<API_ORIGIN>/uploads/src/...`.
+Аватары и картинки постов лежат в `UPLOADS_DIR/src/avatar` и `UPLOADS_DIR/src/featured_image` (файлы 644, каталоги 755). В базе хранится путь `/uploads/src/...` без домена. Полную ссылку собирает клиент: origin окружения (`NEXT_PUBLIC_APP_API_URL`, в проде тот же хост, что отдаёт nginx) плюс этот путь.
 
 В проде каталог отдаёт nginx из стека edge, напрямую с тома и только на чтение: Node картинки не читает и не гонит. В dev, без nginx, их отдаёт сам backend (`SERVE_UPLOADS`, по умолчанию включено вне `NODE_ENV=production`). Старые ссылки на S3 остаются в базе и открываются как раньше, но при удалении поста или смене аватара такие файлы не удаляются. `backend/uploads` в git не попадает.
 
