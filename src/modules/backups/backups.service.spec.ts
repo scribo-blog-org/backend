@@ -20,7 +20,11 @@ describe('BackupsService', () => {
     let uploads: string;
     let dumpBin = '';
 
-    const service = (model: ReturnType<typeof fakeModel>, enabled = true) =>
+    const service = (
+        model: ReturnType<typeof fakeModel>,
+        enabled = true,
+        logger = fakeLogger(),
+    ) =>
         new BackupsService(
             new ConfigService({
                 BACKUP_ENABLED: enabled ? 'true' : 'false',
@@ -31,7 +35,7 @@ describe('BackupsService', () => {
             }),
             model as any,
             fakeConnection() as any,
-            fakeLogger() as any,
+            logger as any,
         );
 
     const idle = async (svc: BackupsService) => {
@@ -93,6 +97,46 @@ describe('BackupsService', () => {
             'uploads/src',
             'uploads/src/a.png',
         ]);
+    });
+
+    it('logs a manual backup with the author snapshot for the user badge', async () => {
+        fakeDump('printf "dump"');
+        const logger = fakeLogger();
+        const svc = service(fakeModel(), true, logger);
+        await svc.start('manual', '64b64c1f1c9a4f0e5a1b2c3d', {
+            id: '64b64c1f1c9a4f0e5a1b2c3d',
+            nick_name: 'anna',
+            role: 'tech_admin',
+            avatar: 'a.png',
+        });
+        await idle(svc);
+
+        const done = logger.log.mock.calls
+            .map(([entry]) => entry)
+            .find((entry) => entry.type === 'backup_done');
+        expect(done.data).toMatchObject({
+            user: '64b64c1f1c9a4f0e5a1b2c3d',
+            user_nick: 'anna',
+            user_role: 'tech_admin',
+            user_avatar: 'a.png',
+            trigger: 'manual',
+        });
+        expect(done.data.system).toBeUndefined();
+        expect(done.data.file_name).toMatch(/^scribo-.*\.tar$/);
+    });
+
+    it('logs a scheduled backup as a system event', async () => {
+        fakeDump('printf "dump"');
+        const logger = fakeLogger();
+        const svc = service(fakeModel(), true, logger);
+        await svc.start('schedule');
+        await idle(svc);
+
+        const done = logger.log.mock.calls
+            .map(([entry]) => entry)
+            .find((entry) => entry.type === 'backup_done');
+        expect(done.data).toMatchObject({ system: true, trigger: 'schedule' });
+        expect(done.data.user).toBeUndefined();
     });
 
     it("a manual run adds a backup on top of today's and keeps both", async () => {

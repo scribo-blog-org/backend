@@ -2,6 +2,7 @@ import { createHash } from 'crypto';
 import { createReadStream } from 'fs';
 import { readdir, stat } from 'fs/promises';
 import path from 'path';
+import { dbVersionOf } from './db-version';
 
 export const MANIFEST_VERSION = 1;
 export const MANIFEST_FILE = 'manifest.json';
@@ -30,6 +31,8 @@ export type Manifest = {
         sha256: string;
         bytes: number;
         collections: string[];
+        /** Версия данных (см. db-version.ts). Нет в архивах, снятых до версий. */
+        version?: string | null;
     };
     uploads: { dir: string; files: number; bytes: number };
 };
@@ -53,14 +56,24 @@ export function parseManifest(raw: string): Manifest {
         m.db.archive !== MONGO_ARCHIVE ||
         !/^[a-f0-9]{64}$/.test(m.db.sha256 ?? '') ||
         !Array.isArray(m.db.collections) ||
+        (m.db.version !== undefined &&
+            m.db.version !== null &&
+            typeof m.db.version !== 'string') ||
         typeof m.uploads?.dir !== 'string' ||
         !/^[\w.-]+$/.test(m.uploads.dir) ||
+        m.uploads.dir === '.' ||
+        m.uploads.dir === '..' ||
         typeof m.uploads.files !== 'number' ||
         typeof m.uploads.bytes !== 'number'
     ) {
         throw new Error('manifest.json has an unsupported shape');
     }
     return m as Manifest;
+}
+
+/** Версия данных архива. У старых архивов без неё берём из версии backend, которой он снят. */
+export function manifestDbVersion(manifest: Manifest): string | null {
+    return manifest.db.version ?? dbVersionOf(manifest.app_version);
 }
 
 export function sha256File(file: string): Promise<string> {
