@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
-import { ROLE_VALUES, ROLES, type Role } from '../../authz/roles';
+import { DEFAULT_ROLE, ROLE_VALUES, type Role } from '../../authz/roles';
 import { FIELD_LIMITS } from '../../validation/field-limits';
 import { Notification, NotificationSchema } from './notification.schema';
 
@@ -46,7 +46,7 @@ export class User {
     @Prop({
         type: String,
         enum: ROLE_VALUES,
-        default: ROLES.USER,
+        default: DEFAULT_ROLE,
         required: true,
     })
     role!: Role;

@@ -16,6 +16,7 @@ import { RequirePermissions } from '../../authz/decorators/require-permissions.d
 import { PERMISSIONS } from '../../authz/permissions';
 import type { Actor } from '../../authz/policy';
 import { PaginationQueryDto } from '../../http/query.dto';
+import { LoggerService } from '../../infra/logger.service';
 import { BackupsService } from './backups.service';
 import { BackupRestoreService } from './backups.restore.service';
 import { RestoreBackupDto } from './dto/restore-backup.dto';
@@ -28,6 +29,7 @@ export class BackupsController {
     constructor(
         private readonly backups: BackupsService,
         private readonly restores: BackupRestoreService,
+        private readonly logger: LoggerService,
     ) {}
 
     @Get()
@@ -43,6 +45,9 @@ export class BackupsController {
     @Post()
     async run(@CurrentUser() actor: Actor) {
         const data = await this.backups.start('manual', actor.id);
+        await this.logger.action('backup_run', actor, {
+            backup: String(data._id),
+        });
         return { status: true, message: 'Backup started', data };
     }
 
@@ -54,6 +59,10 @@ export class BackupsController {
         @CurrentUser() actor: Actor,
     ) {
         const data = await this.restores.start(id, actor.id);
+        await this.logger.action('backup_restore', actor, {
+            backup: data.backup_id,
+            file_name: data.file_name,
+        });
         return { status: true, message: 'Restore started', data };
     }
 

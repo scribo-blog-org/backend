@@ -10,6 +10,7 @@ import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'fs/promises';
 import { Connection } from 'mongoose';
 import path from 'path';
 import { redact, uriWithoutDb } from './backups.config';
+import { LoggerService } from '../../infra/logger.service';
 import { BackupsService } from './backups.service';
 import {
     readLock,
@@ -60,6 +61,7 @@ export class BackupRestoreService implements OnModuleInit {
     constructor(
         private readonly archives: BackupsService,
         @InjectConnection() private readonly connection: Connection,
+        private readonly logger: LoggerService,
     ) {}
 
     private get dir() {
@@ -232,6 +234,22 @@ export class BackupRestoreService implements OnModuleInit {
                     : undefined,
             ).catch((e) => console.error('restore state not saved', e));
             await removeLock(this.dir);
+            await this.logger.log({
+                type: 'backup_restore_result',
+                message: error
+                    ? `Restore of ${job.file_name} failed${job.rolled_back ? ' (rolled back)' : ''}: ${error}`
+                    : `Restore of ${job.file_name} finished`,
+                data: {
+                    system: true,
+                    backup: job.backup_id,
+                    file_name: job.file_name,
+                    status: error ? 'failed' : 'success',
+                    rolled_back: job.rolled_back,
+                    safety_backup: safetyId,
+                    error,
+                    ...(userId ? { user: userId } : {}),
+                },
+            });
             this.archives.release();
         }
     }

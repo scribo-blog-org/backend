@@ -15,7 +15,7 @@ import path from 'path';
 import { BackupRestoreService } from './backups.restore.service';
 import { BackupsService } from './backups.service';
 import { readState, writeLock } from './backups.state';
-import { fakeConnection, fakeModel } from './backups.test-utils';
+import { fakeConnection, fakeLogger, fakeModel } from './backups.test-utils';
 import { MaintenanceGuard } from './maintenance.guard';
 
 describe('backup restore', () => {
@@ -26,6 +26,7 @@ describe('backup restore', () => {
     let calls: string;
     let connection: ReturnType<typeof fakeConnection>;
     let model: ReturnType<typeof fakeModel>;
+    let logger: ReturnType<typeof fakeLogger>;
     let backups: BackupsService;
     let restore: BackupRestoreService;
 
@@ -44,8 +45,13 @@ describe('backup restore', () => {
             }),
             model as any,
             connection as any,
+            logger as any,
         );
-        restore = new BackupRestoreService(backups, connection as any);
+        restore = new BackupRestoreService(
+            backups,
+            connection as any,
+            logger as any,
+        );
     };
 
     const script = (name: string, body: string) => {
@@ -95,6 +101,7 @@ if [ -f "${root}/fail-on-$n" ]; then echo "boom mongodb+srv://u:secret@h/db" >&2
         );
         mkdirSync(dir);
         model = fakeModel();
+        logger = fakeLogger();
         connection = fakeConnection(['users', 'posts', 'backups']);
         build();
     });

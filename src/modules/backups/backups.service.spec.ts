@@ -12,7 +12,7 @@ import {
 import { tmpdir } from 'os';
 import path from 'path';
 import { BackupsService } from './backups.service';
-import { fakeConnection, fakeModel } from './backups.test-utils';
+import { fakeConnection, fakeLogger, fakeModel } from './backups.test-utils';
 
 describe('BackupsService', () => {
     let dir: string;
@@ -31,6 +31,7 @@ describe('BackupsService', () => {
             }),
             model as any,
             fakeConnection() as any,
+            fakeLogger() as any,
         );
 
     const idle = async (svc: BackupsService) => {

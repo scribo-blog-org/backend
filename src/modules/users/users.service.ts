@@ -9,7 +9,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { canManageRole } from '../../authz/policy';
 import type { Actor } from '../../authz/policy';
-import type { Role } from '../../authz/roles';
+import { DEFAULT_ROLE, type Role } from '../../authz/roles';
 import { LoggerService } from '../../infra/logger.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { tryConsume } from '../../http/rate-limit.guard';
@@ -213,6 +213,10 @@ export class UsersService implements OnModuleInit {
             )
             .lean<UserLean>();
 
+        await this.logger.action('follow_user', actor, {
+            target_user: String(followed._id),
+            target_nick: followed.nick_name,
+        });
         return {
             follower: this.sanitize(followerDoc),
             followed: this.sanitize(followedDoc),
@@ -251,6 +255,10 @@ export class UsersService implements OnModuleInit {
             )
             .lean<UserLean>();
 
+        await this.logger.action('unfollow_user', actor, {
+            target_user: String(followed._id),
+            target_nick: followed.nick_name,
+        });
         return {
             follower: this.sanitize(followerDoc),
             followed: this.sanitize(followedDoc),
@@ -281,15 +289,17 @@ export class UsersService implements OnModuleInit {
         await this.sessions.deleteMany({
             $or: [{ user: user._id }, { user: String(user._id) }],
         });
-        await this.logger.log({
-            type: 'update_role',
-            message: `User ${actor.nick_name} updated role for user ${userId}`,
-            data: {
-                user: actor.id,
+        await this.logger.action(
+            'update_role',
+            actor,
+            {
                 updated_user: new Types.ObjectId(userId),
+                target_nick: user.nick_name,
+                old_role: user.role,
                 new_role: newRole,
             },
-        });
+            `User ${actor.nick_name} updated role for user ${userId}`,
+        );
         return this.sanitize(result);
     }
 
@@ -301,6 +311,7 @@ export class UsersService implements OnModuleInit {
     }) {
         const created = await this.users.create({
             ...data,
+            role: DEFAULT_ROLE,
             last_activity_at: new Date(),
             is_last_activity_public: true,
         });

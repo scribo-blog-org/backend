@@ -11,6 +11,7 @@ import { PERMISSIONS } from '../../authz/permissions';
 import { hasPermission, isResourceOwner, type Actor } from '../../authz/policy';
 import { FilesService } from '../../files/files.service';
 import { LoggerService } from '../../infra/logger.service';
+import { categorySnapshot, changeOf, compact } from '../../infra/log-helpers';
 import { parsePagination } from '../../http/pagination';
 import type { ListPostsQueryDto } from '../../http/query.dto';
 import { fieldError } from '../../http/http-errors';
@@ -257,11 +258,19 @@ export class PostsService {
             category: data.categoryId,
             ...(imgUrl ? { featured_image: imgUrl } : {}),
         });
-        await this.logger.log({
-            type: 'create_post',
-            message: `User ${actor.nick_name} created post`,
-            data: { user: actor.id, post: created._id },
-        });
+        await this.logger.action(
+            'create_post',
+            actor,
+            {
+                post: created._id,
+                post_title: data.postTitle,
+                category: category._id,
+                category_snapshot: categorySnapshot(category),
+                has_image: Boolean(imgUrl),
+                content_length: data.postContent.length,
+            },
+            `User ${actor.nick_name} created post`,
+        );
         await this.mentionNotifications.notifyFromText({
             actorId: actor.id,
             text: data.postContent,
@@ -293,6 +302,11 @@ export class PostsService {
         );
 
         const update: Record<string, unknown> = {};
+        let newCategory: {
+            name?: unknown;
+            icon?: unknown;
+            color?: unknown;
+        } | null = null;
         if (data.postTitle !== undefined) update.title = data.postTitle;
         if (data.postContent !== undefined)
             update.content_text = data.postContent;
@@ -307,6 +321,7 @@ export class PostsService {
                     data.categoryId,
                 );
             }
+            newCategory = category;
             update.category = data.categoryId;
         }
 
@@ -339,11 +354,65 @@ export class PostsService {
         if (!result) {
             throw new NotFoundException('Post not found!');
         }
-        await this.logger.log({
-            type: 'update_post',
-            message: `User ${actor.nick_name} updated post ${post._id}`,
-            data: { user: actor.id, post: result._id },
-        });
+        const categoryChanged =
+            newCategory !== null &&
+            String(post.category) !== String(data.categoryId);
+        const oldCategory = categoryChanged
+            ? await this.categories
+                  .findById(post.category)
+                  .select('name icon color')
+                  .lean()
+            : null;
+        const imageChange = !shouldTouchImage
+            ? null
+            : update.featured_image
+              ? post.featured_image
+                  ? 'changed'
+                  : 'added'
+              : post.featured_image
+                ? 'removed'
+                : null;
+        const changes = compact([
+            data.postTitle !== undefined
+                ? changeOf('title', post.title, data.postTitle)
+                : null,
+            categoryChanged
+                ? {
+                      field: 'category',
+                      from: oldCategory?.name ?? null,
+                      to: newCategory?.name ?? null,
+                  }
+                : null,
+            imageChange ? { field: 'image', to: imageChange } : null,
+            data.postContent !== undefined &&
+            String(post.content_text ?? '') !== data.postContent
+                ? {
+                      field: 'content',
+                      changed: true,
+                      from_length: String(post.content_text ?? '').length,
+                      to_length: data.postContent.length,
+                  }
+                : null,
+        ]);
+        // Сохранение без изменений в журнал не пишем: это шум, а не действие.
+        if (changes.length) {
+            await this.logger.action(
+                'update_post',
+                actor,
+                {
+                    post: result._id,
+                    post_title: result.title,
+                    category: result.category,
+                    category_snapshot: categorySnapshot(
+                        categoryChanged
+                            ? newCategory
+                            : (oldCategory ?? undefined),
+                    ),
+                    changes,
+                },
+                `User ${actor.nick_name} updated post ${post._id}`,
+            );
+        }
         if (data.postContent !== undefined) {
             await this.mentionNotifications.notifyNewMentions(
                 String(post.content_text || ''),
@@ -394,11 +463,25 @@ export class PostsService {
             type: { $in: ['like_post', 'comment_post'] },
             post: id,
         });
-        await this.logger.log({
-            type: 'delete_post',
-            message: `User ${actor.nick_name} deleted post ${id}`,
-            data: { post: result._id, user: actor.id },
-        });
+        const deletedCategory = await this.categories
+            .findById(result.category)
+            .select('name icon color')
+            .lean();
+        await this.logger.action(
+            'delete_post',
+            actor,
+            {
+                post: result._id,
+                post_title: result.title,
+                post_author: String(result.author),
+                category: result.category,
+                category_snapshot: categorySnapshot(deletedCategory),
+                comments_removed: commentIds.length,
+                likes_count: (result.likes ?? []).length,
+                views_count: result.views_count ?? 0,
+            },
+            `User ${actor.nick_name} deleted post ${id}`,
+        );
         return result;
     }
 
@@ -417,6 +500,10 @@ export class PostsService {
             throw new ConflictException('Post is already in saved posts!');
         }
         const result = await this.usersService.addSavedPost(actor.id, id);
+        await this.logger.action('save_post', actor, {
+            post: id,
+            post_title: post.title,
+        });
         return { saved_posts: result?.saved_posts };
     }
 
@@ -435,6 +522,10 @@ export class PostsService {
             throw new ConflictException('Post is not in saved posts!');
         }
         const result = await this.usersService.removeSavedPost(actor.id, id);
+        await this.logger.action('unsave_post', actor, {
+            post: id,
+            post_title: post.title,
+        });
         return { saved_posts: result?.saved_posts };
     }
 
@@ -460,11 +551,16 @@ export class PostsService {
                 post: id,
             });
         }
-        await this.logger.log({
-            type: 'like_post',
-            message: `User ${actor.nick_name} liked post ${id}`,
-            data: { post: id, user: actor.id },
-        });
+        await this.logger.action(
+            'like_post',
+            actor,
+            {
+                post: id,
+                post_title: post.title,
+                post_author: String(post.author),
+            },
+            `User ${actor.nick_name} liked post ${id}`,
+        );
         return { likes: result?.likes };
     }
 
@@ -483,6 +579,11 @@ export class PostsService {
                 { returnDocument: 'after' },
             )
             .lean();
+        await this.logger.action('unlike_post', actor, {
+            post: id,
+            post_title: post.title,
+            post_author: String(post.author),
+        });
         return { likes: result?.likes };
     }
 }

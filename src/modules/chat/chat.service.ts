@@ -10,6 +10,7 @@ import { Model, Types } from 'mongoose';
 import type { Actor } from '../../authz/policy';
 import { FIELD_LIMITS } from '../../validation/field-limits';
 import { MailService } from '../../infra/mail.service';
+import { LoggerService } from '../../infra/logger.service';
 import { ChatMessage } from '../../database/schemas/chat-message.schema';
 import { Conversation } from '../../database/schemas/conversation.schema';
 import { User } from '../../database/schemas/user.schema';
@@ -62,6 +63,7 @@ export class ChatService {
         private readonly socketService: SocketService,
         private readonly mail: MailService,
         private readonly config: ConfigService,
+        private readonly logger: LoggerService,
     ) {}
 
     private participantKey(a: string, b: string) {
@@ -349,6 +351,12 @@ export class ChatService {
         }
 
         if (isNew) {
+            // Содержимое переписки в журнал не попадает: только факт, что чат начат.
+            await this.logger.action('create_conversation', actor, {
+                target_user: otherUserId,
+                target_nick: other.nick_name,
+                conversation: String(conversation._id),
+            });
             await this.pushConversationUpdate(String(conversation._id), [
                 actor.id,
                 otherUserId,
@@ -726,11 +734,23 @@ export class ChatService {
             actor,
         );
         const participantIds = this.participantIds(conversation);
+        const otherId = participantIds.find((id) => id !== actor.id);
+        const other = otherId
+            ? await this.users
+                  .findById(otherId)
+                  .select('nick_name')
+                  .lean<{ nick_name?: string }>()
+            : null;
 
         await this.messages.deleteMany({
             conversation_id: conversation._id,
         });
         await this.conversations.findByIdAndDelete(conversation._id);
+        await this.logger.action('delete_conversation', actor, {
+            target_user: otherId ?? null,
+            target_nick: other?.nick_name ?? null,
+            conversation: conversationId,
+        });
 
         for (const userId of participantIds) {
             this.socketService.chatConversationDeleted(userId, conversationId);

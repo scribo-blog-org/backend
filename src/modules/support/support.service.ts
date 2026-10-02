@@ -14,6 +14,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { fieldError } from '../../http/http-errors';
 import { FIELD_LIMITS } from '../../validation/field-limits';
 import { LoggerService } from '../../infra/logger.service';
+import { textPreview } from '../../infra/log-helpers';
 import { MailService } from '../../infra/mail.service';
 import { paginationMeta, parsePagination } from '../../http/pagination';
 import type { ListSupportQueryDto } from '../../http/query.dto';
@@ -350,6 +351,7 @@ export class SupportService {
                 kind: supportKind,
                 user: userId,
                 anonymous: !authenticated,
+                message_preview: textPreview(supportMessage),
                 ...(authenticated ? {} : { email }),
             },
         });
@@ -485,6 +487,7 @@ export class SupportService {
                 kind: existing.kind,
                 user: actor.id,
                 author_type: 'staff',
+                reply_preview: textPreview(message),
             },
         });
         return this.withAccessFlags(
@@ -545,6 +548,7 @@ export class SupportService {
                 kind: existing.kind,
                 user: actor?.id,
                 author_type: asStaff ? 'staff' : 'requester',
+                reply_preview: textPreview(message),
             },
         });
         return this.withAccessFlags(
