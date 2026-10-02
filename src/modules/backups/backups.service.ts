@@ -6,10 +6,9 @@ import {
     OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectModel } from '@nestjs/mongoose';
-import { spawn } from 'child_process';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { randomBytes } from 'crypto';
-import { createReadStream, createWriteStream } from 'fs';
+import { createReadStream } from 'fs';
 import {
     chmod,
     mkdir,
@@ -19,10 +18,14 @@ import {
     stat,
     writeFile,
 } from 'fs/promises';
-import { Model, Types } from 'mongoose';
+import { Connection, Model, Types } from 'mongoose';
 import path from 'path';
-import { pipeline } from 'stream/promises';
 import { mongoUri } from '../../config/startup';
+import {
+    actorFields,
+    LoggerService,
+    type LogActor,
+} from '../../infra/logger.service';
 import {
     Backup,
     type BackupTrigger,
@@ -30,37 +33,74 @@ import {
 import { paginationMeta, parsePagination } from '../../http/pagination';
 import {
     backupsConfig,
-    expiredDays,
+    expiredBackups,
     msUntilNextRun,
+    redact,
     tarAccepted,
     utcDay,
     type BackupsConfig,
 } from './backups.config';
+import { dbVersionOf, incompatibility, readDbMeta } from './db-version';
+import { readState } from './backups.state';
+import {
+    MANIFEST_FILE,
+    MANIFEST_VERSION,
+    MONGO_ARCHIVE,
+    appVersion,
+    dirStats,
+    manifestDbVersion,
+    sha256File,
+    type BackupKind,
+    type Manifest,
+} from './manifest';
+import { runProcess } from './run-process';
 
-const DUMP_TIMEOUT_MS = 30 * 60 * 1000;
-const STDERR_TAIL = 1500;
 // setTimeout не принимает задержку больше 2^31 мс; сутки с запасом влезают.
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
+type Busy = 'backup' | 'restore' | null;
+
+/** Чем запущен сам бекап: загрузка архива бекапом не является. */
+type RunTrigger = Exclude<BackupTrigger, 'upload'>;
+
+const fileStamp = () =>
+    new Date()
+        .toISOString()
+        .replace(/[-:]/g, '')
+        .replace(/\..*/, '')
+        .replace('T', '-');
+
 /**
- * Бекап в один файл `scribo-ГГГГ-ММ-ДД.tar`: дамп Mongo и каталог загрузок.
- * Запускается по расписанию и по кнопке из админки. Файл называется по дню
- * (UTC), поэтому повторный запуск в тот же день перезаписывает сегодняшний
- * бекап, а в новый день создаёт новый.
+ * Бекап в один файл: дамп Mongo, каталог загрузок и manifest.json, который
+ * их связывает. Запускается по расписанию и по кнопке из админки. Каждый
+ * запуск это новый файл со временем в имени. Правила хранения (за сегодня все,
+ * за прошлые дни один, дальше по одному на месяц) применяет
+ * prune после каждого бекапа. Страховочный снимок перед откатом живёт
+ * отдельно: хранятся последние несколько.
  */
 @Injectable()
 export class BackupsService implements OnModuleInit, OnModuleDestroy {
     private readonly cfg: BackupsConfig;
     private readonly uri: () => string;
     private timer: NodeJS.Timeout | null = null;
-    private running = false;
+    private busy: Busy = null;
 
     constructor(
         config: ConfigService,
         @InjectModel(Backup.name) private readonly backups: Model<Backup>,
+        @InjectConnection() private readonly connection: Connection,
+        private readonly logger: LoggerService,
     ) {
         this.cfg = backupsConfig(config);
         this.uri = () => mongoUri(config);
+    }
+
+    get settings(): BackupsConfig {
+        return this.cfg;
+    }
+
+    connectionUri(): string {
+        return this.uri();
     }
 
     async onModuleInit() {
@@ -83,18 +123,46 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         if (this.timer) clearTimeout(this.timer);
     }
 
+    /** Один процесс занят одним делом: бекапом или откатом. */
+    acquire(kind: 'backup' | 'restore'): boolean {
+        if (this.busy) return false;
+        this.busy = kind;
+        return true;
+    }
+
+    release() {
+        this.busy = null;
+    }
+
+    isRestoring() {
+        return this.busy === 'restore';
+    }
+
     status() {
         const { hour, minute } = this.cfg.at;
         const pad = (n: number) => String(n).padStart(2, '0');
         return {
             enabled: this.cfg.enabled,
-            running: this.running,
+            restore_enabled: this.cfg.restoreEnabled,
+            running: this.busy === 'backup',
+            restoring: this.busy === 'restore',
             schedule_at_utc: this.cfg.enabled
                 ? `${pad(hour)}:${pad(minute)}`
                 : null,
             keep_daily_days: this.cfg.keepDailyDays,
             keep_months: this.cfg.keepMonths,
+            db_name: this.connection.name,
+            app_version: appVersion(),
+            db_version: this.currentDbVersion(),
+            upload_enabled: this.cfg.restoreEnabled,
+            upload_max_bytes: this.cfg.uploadMaxBytes,
+            keep_uploaded: this.cfg.keepUploaded,
         };
+    }
+
+    /** Версия данных, с которой работает эта система. */
+    currentDbVersion(): string | null {
+        return dbVersionOf(appVersion());
     }
 
     async list(query: { page?: number; limit?: number }) {
@@ -110,41 +178,81 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         ]);
         return {
             status: this.status(),
-            items: items.map((item) => ({
-                ...item,
-                can_download:
+            items: items.map((item) => {
+                const hasFile =
                     item.status === 'success' &&
                     Boolean(item.file_name) &&
-                    !item.file_removed_at,
-            })),
+                    !item.file_removed_at;
+                // У записей до введения версий версии в записи нет: тогда решает
+                // проверка архива при откате.
+                const blocked =
+                    item.contents?.db_version !== undefined
+                        ? incompatibility(
+                              item.contents.db_version,
+                              this.currentDbVersion(),
+                          )
+                        : null;
+                return {
+                    ...item,
+                    can_download: hasFile,
+                    can_restore:
+                        this.cfg.restoreEnabled &&
+                        hasFile &&
+                        Boolean(item.contents) &&
+                        !blocked,
+                    restore_blocked: hasFile ? blocked : null,
+                };
+            }),
             pagination: paginationMeta(page, limit, total),
         };
     }
 
-    async start(trigger: BackupTrigger, userId?: string) {
+    async start(trigger: RunTrigger, userId?: string, author?: LogActor) {
         if (!this.cfg.enabled) {
             throw new ConflictException('Backups are disabled');
         }
-        if (this.running) {
-            throw new ConflictException('A backup is already running');
+        if (!this.acquire('backup')) {
+            throw new ConflictException(
+                this.busy === 'restore'
+                    ? 'A restore is in progress'
+                    : 'A backup is already running',
+            );
         }
-        this.running = true;
         let record;
         try {
-            const startedAt = new Date();
-            record = await this.backups.create({
-                day: utcDay(startedAt),
-                trigger,
-                triggered_by: userId ? new Types.ObjectId(userId) : null,
-                status: 'running',
-                started_at: startedAt,
-            });
+            record = await this.createRecord('daily', trigger, userId);
         } catch (error) {
-            this.running = false;
+            this.release();
             throw error;
         }
-        void this.execute(record._id, record.day);
+        void this.runAndRelease(record._id, record.day, trigger, author);
         return record.toObject();
+    }
+
+    /**
+     * Страховочный снимок перед откатом. Зовётся из отката, который уже держит
+     * блокировку, поэтому сам её не берёт. Бросает, если снять не удалось.
+     */
+    async snapshot(userId?: string) {
+        const record = await this.createRecord('pre_restore', 'manual', userId);
+        const error = await this.produce(
+            record._id,
+            record.day,
+            'pre_restore',
+            'restore',
+        );
+        if (error) throw new Error(`Safety snapshot failed: ${error}`);
+        return record;
+    }
+
+    async findRecord(id: string) {
+        return Types.ObjectId.isValid(id)
+            ? await this.backups.findById(id).lean()
+            : null;
+    }
+
+    pathOf(name: string): string {
+        return this.resolve(name);
     }
 
     async openFile(id: string) {
@@ -177,6 +285,94 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         };
     }
 
+    /** Запись списка, у которой уже есть живой файл этого бекапа (по id манифеста). */
+    async listedArchive(manifestId: string) {
+        const own = await this.findRecord(manifestId);
+        if (own && own.status === 'success' && !own.file_removed_at) {
+            return own;
+        }
+        const [copy] = await this.backups
+            .find({ source_id: manifestId, file_removed_at: null })
+            .lean();
+        return copy ?? null;
+    }
+
+    /**
+     * Принимает проверенный архив, загруженный вручную: кладёт файл к остальным
+     * и заводит запись в истории. Файл уже проверен вызывающим.
+     */
+    async adopt(
+        tempPath: string,
+        manifest: Manifest,
+        meta: { userId?: string; originalName: string },
+    ) {
+        const fileName = `scribo-upload-${fileStamp()}-${randomBytes(2).toString('hex')}.tar`;
+        const target = this.resolve(fileName);
+        await rename(tempPath, target);
+        await chmod(target, 0o600);
+        const { size } = await stat(target);
+        const now = new Date();
+        let record;
+        try {
+            record = await this.backups.create({
+                day: manifest.day,
+                kind: 'uploaded',
+                trigger: 'upload',
+                triggered_by: meta.userId
+                    ? new Types.ObjectId(meta.userId)
+                    : null,
+                status: 'success',
+                started_at: now,
+                finished_at: now,
+                file_name: fileName,
+                size_bytes: size,
+                source_id: manifest.id,
+                source: {
+                    created_at: manifest.created_at,
+                    app_version: manifest.app_version,
+                    db_version: manifestDbVersion(manifest),
+                    db_name: manifest.db.name,
+                    trigger: manifest.trigger,
+                    kind: manifest.kind,
+                    original_name: meta.originalName,
+                },
+                contents: {
+                    db_name: manifest.db.name,
+                    collections: manifest.db.collections.length,
+                    db_bytes: manifest.db.bytes,
+                    uploads_files: manifest.uploads.files,
+                    uploads_bytes: manifest.uploads.bytes,
+                    based_on: manifest.based_on,
+                    app_version: manifest.app_version,
+                    db_version: manifestDbVersion(manifest),
+                },
+            });
+        } catch (error) {
+            await rm(target, { force: true });
+            throw error;
+        }
+        await this.prune().catch((e) =>
+            console.error('backup prune failed', e),
+        );
+        return record.toObject();
+    }
+
+    private createRecord(
+        kind: BackupKind,
+        trigger: BackupTrigger,
+        userId?: string,
+    ) {
+        const startedAt = new Date();
+        return this.backups.create({
+            day: utcDay(startedAt),
+            kind,
+            trigger,
+            triggered_by: userId ? new Types.ObjectId(userId) : null,
+            status: 'running',
+            started_at: startedAt,
+        });
+    }
+
     private scheduleNext(from = new Date()) {
         const delay = Math.min(msUntilNextRun(this.cfg.at, from), MAX_TIMER_MS);
         this.timer = setTimeout(() => {
@@ -191,8 +387,89 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         this.timer.unref();
     }
 
-    private async execute(id: Types.ObjectId, day: string) {
-        const fileName = `scribo-${day}.tar`;
+    private async runAndRelease(
+        id: Types.ObjectId,
+        day: string,
+        trigger: RunTrigger,
+        author?: LogActor,
+    ) {
+        try {
+            const error = await this.produce(id, day, 'daily', trigger);
+            if (error) {
+                // Тихо упавший бекап хуже всего: в журнале его должно быть видно.
+                await this.logEvent(
+                    'backup_failed',
+                    `Backup failed (${trigger}): ${error}`,
+                    author,
+                    { trigger, backup: String(id), error },
+                );
+            } else {
+                const record = await this.findRecord(String(id));
+                await this.logEvent(
+                    'backup_done',
+                    `Backup ${record?.file_name ?? id} finished (${trigger})`,
+                    author,
+                    {
+                        trigger,
+                        backup: String(id),
+                        file_name: record?.file_name ?? null,
+                        size_bytes: record?.size_bytes ?? null,
+                    },
+                );
+            }
+            const removed = await this.prune().catch((e) => {
+                console.error('backup prune failed', e);
+                return 0;
+            });
+            if (removed > 0) {
+                await this.logger.system(
+                    'backup_rotated',
+                    `Backup rotation removed ${removed} file(s)`,
+                    { removed_files: removed },
+                );
+            }
+        } finally {
+            this.release();
+        }
+    }
+
+    /**
+     * Запись журнала о бекапе. Если его запустил человек, в записи его снимок
+     * для плашки пользователя, иначе это событие системы (расписание).
+     */
+    private logEvent(
+        type: string,
+        message: string,
+        author: LogActor | undefined,
+        data: Record<string, unknown>,
+    ) {
+        return this.logger.log({
+            type,
+            message,
+            data: {
+                ...(author ? actorFields(author) : { system: true }),
+                ...data,
+            },
+        });
+    }
+
+    /**
+     * Собирает архив и обновляет запись. Возвращает текст ошибки или null.
+     * Исключения наружу не выпускает: итог всегда оказывается в записи.
+     */
+    private async produce(
+        id: Types.ObjectId,
+        day: string,
+        kind: BackupKind,
+        trigger: Manifest['trigger'],
+    ): Promise<string | null> {
+        const stamp = fileStamp();
+        // Каждый бекап отдельный файл: ручной не заменяет ни вчерашний,
+        // ни сегодняшний, а добавляется. Лишнее убирает prune.
+        const fileName =
+            kind === 'daily'
+                ? `scribo-${stamp}.tar`
+                : `scribo-pre-restore-${stamp}-${randomBytes(2).toString('hex')}.tar`;
         const target = this.resolve(fileName);
         const partial = this.resolve(`.${fileName}.partial`);
         const work = this.resolve(`.work-${randomBytes(6).toString('hex')}`);
@@ -206,7 +483,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
                 `uri: '${this.uri().replace(/'/g, "''")}'\n`,
                 { mode: 0o600 },
             );
-            await this.runToFile(
+            const dump = path.join(work, MONGO_ARCHIVE);
+            await runProcess(
                 this.cfg.mongodump,
                 [
                     `--config=${conf}`,
@@ -214,41 +492,66 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
                     '--archive',
                     '--numParallelCollections=1',
                 ],
-                path.join(work, 'mongo.archive.gz'),
-                (code) => code === 0,
+                { out: dump },
             );
             await mkdir(this.cfg.uploadsDir, { recursive: true });
-            await this.runToFile(
+
+            const uploadsBase = path.basename(this.cfg.uploadsDir);
+            const [dumpStat, dumpHash, uploads, collections, state] =
+                await Promise.all([
+                    stat(dump),
+                    sha256File(dump),
+                    dirStats(this.cfg.uploadsDir),
+                    this.collectionNames(),
+                    readState(this.cfg.dir),
+                ]);
+            const meta = await readDbMeta(this.connection).catch(() => null);
+            const manifest: Manifest = {
+                format: MANIFEST_VERSION,
+                id: String(id),
+                created_at: new Date().toISOString(),
+                day,
+                kind,
+                trigger,
+                app_version: appVersion(),
+                based_on: state.current?.backup_id ?? null,
+                db: {
+                    name: this.connection.name,
+                    archive: MONGO_ARCHIVE,
+                    sha256: dumpHash,
+                    bytes: dumpStat.size,
+                    collections,
+                    version: meta?.version ?? this.currentDbVersion(),
+                },
+                uploads: { dir: uploadsBase, ...uploads },
+            };
+            await writeFile(
+                path.join(work, MANIFEST_FILE),
+                JSON.stringify(manifest, null, 2),
+            );
+
+            await runProcess(
                 this.cfg.tar,
                 [
                     '-cf',
                     '-',
                     '-C',
                     work,
-                    'mongo.archive.gz',
+                    MANIFEST_FILE,
+                    MONGO_ARCHIVE,
                     '-C',
                     path.dirname(this.cfg.uploadsDir),
-                    path.basename(this.cfg.uploadsDir),
+                    uploadsBase,
                 ],
-                partial,
-                tarAccepted,
+                { out: partial, accepted: tarAccepted },
             );
             const { size } = await stat(partial);
             if (size === 0) throw new Error('The archive is empty');
-            // rename заменяет файл за этот день целиком и сразу: пока дамп
+            // rename заменяет файл за этот день целиком и сразу: пока архив
             // не готов, прежний бекап дня остаётся на месте.
             await rename(partial, target);
             await chmod(target, 0o600);
             const now = new Date();
-            await this.backups.updateMany(
-                {
-                    day,
-                    status: 'success',
-                    _id: { $ne: id },
-                    file_removed_at: null,
-                },
-                { file_removed_at: now, file_removed_reason: 'replaced' },
-            );
             await this.backups.updateOne(
                 { _id: id },
                 {
@@ -256,110 +559,141 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
                     finished_at: now,
                     file_name: fileName,
                     size_bytes: size,
+                    contents: {
+                        db_name: manifest.db.name,
+                        collections: collections.length,
+                        db_bytes: manifest.db.bytes,
+                        uploads_files: uploads.files,
+                        uploads_bytes: uploads.bytes,
+                        based_on: manifest.based_on,
+                        app_version: manifest.app_version,
+                        db_version: manifest.db.version ?? null,
+                    },
                 },
             );
+            return null;
         } catch (error) {
+            const message = redact(
+                error instanceof Error ? error.message : String(error),
+            );
             await this.backups
                 .updateOne(
                     { _id: id },
                     {
                         status: 'failed',
                         finished_at: new Date(),
-                        error: redact(
-                            error instanceof Error
-                                ? error.message
-                                : String(error),
-                        ),
+                        error: message,
                     },
                 )
                 .catch((e) => console.error('backup status not saved', e));
+            return message;
         } finally {
             await rm(conf, { force: true });
             await rm(work, { recursive: true, force: true });
             await rm(partial, { force: true });
-            this.running = false;
-        }
-        await this.prune().catch((e) =>
-            console.error('backup prune failed', e),
-        );
-    }
-
-    /** Запускает программу, складывает её stdout в файл, ждёт завершения. */
-    private async runToFile(
-        command: string,
-        args: string[],
-        out: string,
-        accepted: (code: number | null, stderr: string) => boolean,
-    ) {
-        const child = spawn(command, args, {
-            stdio: ['ignore', 'pipe', 'pipe'],
-        });
-        let tail = '';
-        child.stderr.on('data', (chunk: Buffer) => {
-            tail = (tail + chunk.toString()).slice(-STDERR_TAIL);
-        });
-        const killer = setTimeout(() => child.kill('SIGKILL'), DUMP_TIMEOUT_MS);
-        const name = path.basename(command);
-        const exited = new Promise<void>((resolve, reject) => {
-            child.on('error', (error: NodeJS.ErrnoException) =>
-                reject(
-                    error.code === 'ENOENT'
-                        ? new Error(`${name} is not installed`)
-                        : error,
-                ),
-            );
-            child.on('close', (code, signal) =>
-                accepted(code, tail)
-                    ? resolve()
-                    : reject(
-                          new Error(
-                              `${name} exited with ${signal ?? `code ${code}`}: ${tail.trim()}`,
-                          ),
-                      ),
-            );
-        });
-        try {
-            await Promise.all([
-                pipeline(child.stdout, createWriteStream(out, { mode: 0o600 })),
-                exited,
-            ]);
-        } finally {
-            clearTimeout(killer);
         }
     }
 
-    private async prune() {
+    private async collectionNames(): Promise<string[]> {
+        const db = this.connection.db;
+        if (!db) return [];
+        const list = await db.listCollections({}, { nameOnly: true }).toArray();
+        return list
+            .map((item) => item.name)
+            .filter((name) => !name.startsWith('system.'))
+            .sort();
+    }
+
+    /** Возвращает, сколько файлов удалено. */
+    async prune(): Promise<number> {
         const now = new Date();
-        const successes = await this.backups
-            .find({ status: 'success' })
-            .select('day file_name file_removed_at')
+        const daily = await this.backups
+            .find({
+                status: 'success',
+                kind: { $nin: ['pre_restore', 'uploaded'] },
+            })
+            .select('started_at file_name file_removed_at')
             .lean();
-        const expired = expiredDays(
-            [...new Set(successes.map((item) => item.day))],
+        const expired = expiredBackups(
+            daily.map((item) => ({
+                id: String(item._id),
+                startedAt: item.started_at,
+            })),
             now,
             this.cfg,
         );
-        for (const item of successes) {
+        let removed = 0;
+        for (const item of daily) {
             if (
-                !expired.has(item.day) ||
+                !expired.has(String(item._id)) ||
                 !item.file_name ||
                 item.file_removed_at
             ) {
                 continue;
             }
             await rm(this.resolve(item.file_name), { force: true });
-            await this.backups.updateMany(
-                { day: item.day, file_removed_at: null, status: 'success' },
+            await this.backups.updateOne(
+                { _id: item._id },
                 { file_removed_at: now, file_removed_reason: 'rotation' },
             );
+            removed += 1;
         }
+
+        // Страховочные снимки и загруженные архивы: последние несколько,
+        // остальные удаляем. Это не ежедневные бекапы, правило дней к ним не относится.
+        const limits: [Backup['kind'], number][] = [
+            ['pre_restore', this.cfg.keepPreRestore],
+            ['uploaded', this.cfg.keepUploaded],
+        ];
+        for (const [kind, keep] of limits) {
+            const kept = (
+                await this.backups
+                    .find({ status: 'success', kind, file_removed_at: null })
+                    .select('started_at file_name')
+                    .lean()
+            ).sort((a, b) => b.started_at.getTime() - a.started_at.getTime());
+            for (const item of kept.slice(keep)) {
+                if (item.file_name) {
+                    await rm(this.resolve(item.file_name), { force: true });
+                }
+                await this.backups.updateOne(
+                    { _id: item._id },
+                    { file_removed_at: now, file_removed_reason: 'rotation' },
+                );
+                removed += 1;
+            }
+        }
+        return removed;
     }
 
-    /** Остатки от процесса, который упал посреди бекапа. */
+    /**
+     * Убирает страховочный снимок, который больше не нужен: откат прошёл,
+     * и вернуться не к чему. Запись в истории остаётся.
+     */
+    async discardSnapshot(id: string) {
+        const record = await this.findRecord(id);
+        if (
+            !record ||
+            record.kind !== 'pre_restore' ||
+            record.file_removed_at
+        ) {
+            return;
+        }
+        if (record.file_name) {
+            await rm(this.resolve(record.file_name), { force: true });
+        }
+        await this.backups.updateOne(
+            { _id: record._id },
+            { file_removed_at: new Date(), file_removed_reason: 'restored' },
+        );
+    }
+
+    /** Остатки от процесса, который упал посреди бекапа или отката. */
     private async removeLeftovers() {
         for (const name of await readdir(this.cfg.dir)) {
             if (
                 name.startsWith('.work-') ||
+                name.startsWith('.restore-') ||
                 name.startsWith('.uri.') ||
                 name.endsWith('.partial')
             ) {
@@ -381,8 +715,4 @@ class NotFound extends NotFoundException {
     constructor() {
         super('Backup file not found');
     }
-}
-
-function redact(message: string) {
-    return message.replace(/mongodb(\+srv)?:\/\/[^\s]*@/g, 'mongodb$1://***@');
 }

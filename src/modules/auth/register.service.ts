@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { MailService } from '../../infra/mail.service';
 import { FilesService } from '../../files/files.service';
+import { DEFAULT_ROLE } from '../../authz/roles';
 import { LoggerService } from '../../infra/logger.service';
 import { fieldError } from '../../http/http-errors';
 import { UsersService } from '../users/users.service';
@@ -125,7 +126,11 @@ export class RegisterService {
         await this.logger.log({
             type: 'register',
             message: `User ${user.nick_name} has registered`,
-            data: { user: user._id },
+            data: {
+                user: user._id,
+                user_nick: user.nick_name,
+                user_role: DEFAULT_ROLE,
+            },
         });
 
         return { ...user, avatar: avatarUrl };

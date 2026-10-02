@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { Error as MongooseError } from 'mongoose';
+import type { LoggerService } from '../infra/logger.service';
 import { MulterError } from 'multer';
 import {
     bagFromField,
@@ -17,6 +18,8 @@ import {
 
 @Catch()
 export class ApiExceptionFilter implements ExceptionFilter {
+    constructor(private readonly logger?: LoggerService) {}
+
     catch(exception: unknown, host: ArgumentsHost) {
         const ctx = host.switchToHttp();
         const response = ctx.getResponse<Response>();
@@ -69,6 +72,19 @@ export class ApiExceptionFilter implements ExceptionFilter {
 
         if (!isHttp) {
             console.error(exception);
+        }
+        // В журнал идут ошибки сервера. 503 это режим обслуживания на время
+        // отката бекапа, он задуман и ошибкой не считается.
+        if (status >= 500 && status !== HttpStatus.SERVICE_UNAVAILABLE) {
+            const auth = (request as { auth?: { id?: string } }).auth;
+            void this.logger?.error({
+                status,
+                method: request.method,
+                path: (request.originalUrl || request.url || '').split('?')[0],
+                message,
+                stack: exception instanceof Error ? exception.stack : undefined,
+                user: auth?.id ?? null,
+            });
         }
 
         const payload: Record<string, unknown> = {

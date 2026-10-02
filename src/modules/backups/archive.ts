@@ -1,0 +1,180 @@
+import { createReadStream } from 'fs';
+import { mkdir, stat } from 'fs/promises';
+import path from 'path';
+import { Writable } from 'stream';
+import { pipeline } from 'stream/promises';
+import { createGunzip } from 'zlib';
+import { incompatibility } from './db-version';
+import {
+    MANIFEST_FILE,
+    MONGO_ARCHIVE,
+    dirStats,
+    manifestDbVersion,
+    parseManifest,
+    sha256File,
+    type Manifest,
+} from './manifest';
+import { runProcess } from './run-process';
+import {
+    ArchiveError,
+    readEntry,
+    scanTar,
+    type TarEntry,
+    type TarLimits,
+} from './tar-scan';
+
+export { ArchiveError } from './tar-scan';
+
+const MANIFEST_MAX_BYTES = 1024 * 1024;
+// Начало потока, который пишет mongodump --archive (0x8199e26d, little endian).
+const MONGODUMP_MAGIC = Buffer.from([0x6d, 0xe2, 0x99, 0x81]);
+
+export type VerifyOptions = {
+    tar: string;
+    file: string;
+    work: string;
+    /** Версия данных этой системы: архив другой версии не принимается. */
+    dbVersion: string | null;
+    /** Какой id должен быть в манифесте. Не задан: подойдёт любой (чужой архив). */
+    expectedId?: string;
+    limits: TarLimits;
+};
+
+/**
+ * Что лежит в архиве, должно совпадать с манифестом: ровно манифест, дамп и
+ * каталог загрузок, каждый путь один раз, без выхода за пределы.
+ */
+function checkLayout(entries: TarEntry[], manifest: Manifest) {
+    const seen = new Set<string>();
+    const dir = manifest.uploads.dir;
+    let dump: TarEntry | null = null;
+    let files = 0;
+    let bytes = 0;
+    for (const entry of entries) {
+        // bsdtar на macOS кладёт рядом с файлом `._имя` с расширенными
+        // атрибутами. Это не данные бекапа: пропускаем, если лежит там, где
+        // допустимы файлы архива.
+        const parent = path.posix.dirname(entry.path);
+        if (
+            entry.type === 'file' &&
+            path.posix.basename(entry.path).startsWith('._') &&
+            (parent === '.' || parent === dir || parent.startsWith(`${dir}/`))
+        ) {
+            continue;
+        }
+        if (seen.has(entry.path)) {
+            throw new ArchiveError(`"${entry.path}" is in the archive twice`);
+        }
+        seen.add(entry.path);
+        if (entry.path === MANIFEST_FILE || entry.path === MONGO_ARCHIVE) {
+            if (entry.type !== 'file') {
+                throw new ArchiveError(`${entry.path} must be a file`);
+            }
+            if (entry.path === MONGO_ARCHIVE) dump = entry;
+        } else if (entry.path === dir) {
+            if (entry.type !== 'dir') {
+                throw new ArchiveError(`${dir} must be a directory`);
+            }
+        } else if (entry.path.startsWith(`${dir}/`)) {
+            if (entry.type === 'file') {
+                files += 1;
+                bytes += entry.size;
+            }
+        } else {
+            throw new ArchiveError(
+                `Unexpected "${entry.path}" in the archive: it is not a Scribo backup`,
+            );
+        }
+    }
+    if (!dump) throw new ArchiveError('The database dump is missing');
+    if (dump.size !== manifest.db.bytes) {
+        throw new ArchiveError('The database dump has a wrong size');
+    }
+    if (files !== manifest.uploads.files || bytes !== manifest.uploads.bytes) {
+        throw new ArchiveError(
+            'The uploads in the archive do not match the manifest',
+        );
+    }
+}
+
+/**
+ * Проверяет архив и распаковывает его в `work`. Сначала по заголовкам, ничего
+ * не распаковывая: только обычные файлы и каталоги, только пути манифеста,
+ * размеры и число файлов как в манифесте. Потом распаковка и сверка
+ * контрольной суммы дампа. Ничего не заменяет.
+ */
+export async function verifyArchive(opts: VerifyOptions): Promise<Manifest> {
+    const entries = await scanTar(opts.file, opts.limits);
+    const entry = entries.find((item) => item.path === MANIFEST_FILE);
+    if (!entry || entry.type !== 'file') {
+        throw new ArchiveError('manifest.json is missing: not a Scribo backup');
+    }
+    const manifest = parseManifest(
+        (await readEntry(opts.file, entry, MANIFEST_MAX_BYTES)).toString(
+            'utf8',
+        ),
+    );
+    if (opts.expectedId !== undefined && manifest.id !== opts.expectedId) {
+        throw new ArchiveError('The manifest belongs to a different backup');
+    }
+    const mismatch = incompatibility(
+        manifestDbVersion(manifest),
+        opts.dbVersion,
+    );
+    if (mismatch) throw new ArchiveError(mismatch);
+    checkLayout(entries, manifest);
+
+    await mkdir(opts.work, { recursive: true, mode: 0o700 });
+    await runProcess(opts.tar, ['-xf', opts.file, '-C', opts.work]);
+
+    const dump = path.join(opts.work, MONGO_ARCHIVE);
+    const dumpSize = await stat(dump)
+        .then((s) => s.size)
+        .catch(() => -1);
+    if (dumpSize !== manifest.db.bytes) {
+        throw new ArchiveError(
+            'The database dump is missing or has a wrong size',
+        );
+    }
+    if ((await sha256File(dump)) !== manifest.db.sha256) {
+        throw new ArchiveError('The database dump checksum does not match');
+    }
+    const uploads = await dirStats(path.join(opts.work, manifest.uploads.dir));
+    if (
+        uploads.files !== manifest.uploads.files ||
+        uploads.bytes !== manifest.uploads.bytes
+    ) {
+        throw new ArchiveError(
+            'The uploads in the archive do not match the manifest',
+        );
+    }
+    return manifest;
+}
+
+/**
+ * Дамп должен быть целым gzip-потоком в формате mongodump. Контрольная сумма
+ * манифеста в чужом архиве ничего не доказывает: её могли посчитать от чего
+ * угодно, поэтому смотрим на сам дамп.
+ */
+export async function checkMongoDump(file: string): Promise<void> {
+    let head = Buffer.alloc(0);
+    const sink = new Writable({
+        write(chunk: Buffer, _encoding, done) {
+            if (head.length < MONGODUMP_MAGIC.length) {
+                head = Buffer.concat([head, chunk]).subarray(
+                    0,
+                    MONGODUMP_MAGIC.length,
+                );
+            }
+            done();
+        },
+    });
+    try {
+        await pipeline(createReadStream(file), createGunzip(), sink);
+    } catch {
+        throw new ArchiveError('The database dump is not a valid gzip stream');
+    }
+    if (!head.equals(MONGODUMP_MAGIC)) {
+        throw new ArchiveError('The database dump is not a mongodump archive');
+    }
+}

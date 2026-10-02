@@ -1,6 +1,14 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+    IsIn,
+    IsInt,
+    IsOptional,
+    IsString,
+    Max,
+    MaxLength,
+    Min,
+} from 'class-validator';
 
 function joinRepeatableQuery({
     value,
@@ -132,6 +140,14 @@ export class ListLogsQueryDto extends PaginationQueryDto {
     @IsOptional()
     @IsString()
     type?: string;
+}
+
+export class ListLogEntitiesQueryDto extends PaginationQueryDto {
+    @ApiPropertyOptional({ description: 'Part of a name to look for' })
+    @IsOptional()
+    @IsString()
+    @MaxLength(100)
+    search?: string;
 }
 
 export class DashboardQueryDto {
