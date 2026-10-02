@@ -70,9 +70,7 @@ describe('FilesService', () => {
         await files.saveImage(image(), 'avatar', 'u1', 'userAvatar');
 
         expect(
-            await files.remove(
-                'https://old.example/uploads/src/avatar/u1.png',
-            ),
+            await files.remove('https://old.example/uploads/src/avatar/u1.png'),
         ).toBe(true);
         expect(existsSync(path.join(dir, 'src/avatar/u1.png'))).toBe(false);
     });
