@@ -7,7 +7,7 @@ import {
 import { ROLE_MANAGEMENT } from '../../authz/role-management';
 import { ROLE_PERMISSIONS } from '../../authz/role-permissions';
 import type { Actor } from '../../authz/policy';
-import { StorageService } from '../../infra/storage.service';
+import { FilesService } from '../../files/files.service';
 import { fieldError } from '../../http/http-errors';
 import { comparePassword, setPasswordHash } from '../auth/password';
 import { UsersService } from '../users/users.service';
@@ -18,7 +18,7 @@ import { ConfigService } from '@nestjs/config';
 export class ProfileService {
     constructor(
         private readonly users: UsersService,
-        private readonly storage: StorageService,
+        private readonly files: FilesService,
         private readonly mail: MailService,
         private readonly config: ConfigService,
     ) {}
@@ -89,12 +89,12 @@ export class ProfileService {
 
         if (avatar || fields.userAvatar === null || fields.userAvatar === '') {
             if (stored && 'avatar' in stored && stored.avatar) {
-                await this.storage.deleteFile(
+                await this.files.remove(
                     String((stored as { avatar?: string }).avatar),
                 );
             }
             if (avatar) {
-                const url = await this.storage.uploadImage(
+                const url = await this.files.saveImage(
                     avatar,
                     'avatar',
                     actor.id,

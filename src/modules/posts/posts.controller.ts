@@ -21,7 +21,7 @@ import type { Actor } from '../../authz/policy';
 import { clientIp } from '../../visitor/geo';
 import { ParseMongoIdPipe } from '../../http/mongo-id';
 import { ListPostsQueryDto } from '../../http/query.dto';
-import { imageFileInterceptor } from '../../infra/upload';
+import { imageFileInterceptor } from '../../files/upload';
 import { CommentsService } from './comments.service';
 import { CreateCommentDto, CreatePostDto, EditPostDto } from './dto/posts.dto';
 import { PostsService } from './posts.service';

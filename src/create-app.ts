@@ -3,6 +3,12 @@ import { RequestMethod, type INestApplication } from '@nestjs/common';
 import cookieParser from 'cookie-parser';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import {
+    UPLOADS_URL_PATH,
+    backendServesUploads,
+    uploadsDir,
+} from './files/files.config';
 import { ApiExceptionFilter } from './http/api-exception.filter';
 import { openApiDocument } from './http/openapi-document';
 import { ScriboValidationPipe } from './http/scribo-validation.pipe';
@@ -38,6 +44,26 @@ export async function configureScriboApp(
         exclude: [{ path: 'health', method: RequestMethod.GET }],
     });
     app.use(cookieParser());
+    // В проде каталог отдаёт nginx мимо Node. Здесь это только для разработки.
+    if (backendServesUploads(process.env)) {
+        (app as NestExpressApplication).useStaticAssets(
+            uploadsDir({ get: (key: string) => process.env[key] }),
+            {
+                prefix: UPLOADS_URL_PATH,
+                index: false,
+                dotfiles: 'deny',
+                // Аватар перезаписывается под тем же именем: перепроверка по ETag.
+                setHeaders: (res) => {
+                    res.setHeader('Cache-Control', 'public, no-cache');
+                    res.setHeader('X-Content-Type-Options', 'nosniff');
+                    res.setHeader(
+                        'Cross-Origin-Resource-Policy',
+                        'cross-origin',
+                    );
+                },
+            },
+        );
+    }
     app.useGlobalPipes(new ScriboValidationPipe());
     app.useGlobalFilters(new ApiExceptionFilter());
     app.enableCors({

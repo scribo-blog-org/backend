@@ -5,7 +5,7 @@ import {
     UnauthorizedException,
 } from '@nestjs/common';
 import { MailService } from '../../infra/mail.service';
-import { StorageService } from '../../infra/storage.service';
+import { FilesService } from '../../files/files.service';
 import { LoggerService } from '../../infra/logger.service';
 import { fieldError } from '../../http/http-errors';
 import { UsersService } from '../users/users.service';
@@ -19,7 +19,7 @@ export class RegisterService {
         private readonly users: UsersService,
         private readonly codes: EmailCodesService,
         private readonly mail: MailService,
-        private readonly storage: StorageService,
+        private readonly files: FilesService,
         private readonly auth: AuthService,
         private readonly logger: LoggerService,
     ) {}
@@ -106,7 +106,7 @@ export class RegisterService {
 
         let avatarUrl: string | null = null;
         if (input.avatar && user) {
-            avatarUrl = await this.storage.uploadImage(
+            avatarUrl = await this.files.saveImage(
                 input.avatar,
                 'avatar',
                 String(user._id),

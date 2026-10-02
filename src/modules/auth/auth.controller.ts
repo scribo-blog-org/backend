@@ -24,7 +24,7 @@ import { CurrentUser } from '../../authz/decorators/current-user.decorator';
 import { OptionalAuth, Public } from '../../authz/decorators/public.decorator';
 import type { Actor } from '../../authz/policy';
 import { RateLimits } from '../../http/rate-limit.guard';
-import { imageFileInterceptor } from '../../infra/upload';
+import { imageFileInterceptor } from '../../files/upload';
 import { AuthService } from './auth.service';
 import { clearRefreshCookie, setRefreshCookie } from './auth.cookies';
 import {
