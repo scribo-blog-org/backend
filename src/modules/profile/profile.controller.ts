@@ -9,7 +9,7 @@ import {
 import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../authz/decorators/current-user.decorator';
 import type { Actor } from '../../authz/policy';
-import { imageFileInterceptor } from '../../infra/upload';
+import { imageFileInterceptor } from '../../files/upload';
 import { ChangePasswordDto, UpdateProfileDto } from './dto/profile.dto';
 import { ProfileService } from './profile.service';
 

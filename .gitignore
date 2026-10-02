@@ -15,3 +15,6 @@ node_modules
 coverage
 
 graphify-out/
+
+# local media
+uploads

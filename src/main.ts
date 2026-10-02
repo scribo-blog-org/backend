@@ -14,7 +14,7 @@ async function bootstrap() {
         });
         const startup = app.get(StartupService);
         await startup.assertDatabase();
-        await startup.assertAws();
+        await startup.assertFiles();
 
         await configureScriboApp(app);
         const port = process.env.PORT ?? '3001';
