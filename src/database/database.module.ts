@@ -31,6 +31,7 @@ import {
     ConversationSchema,
 } from './schemas/conversation.schema';
 import { ChatMessage, ChatMessageSchema } from './schemas/chat-message.schema';
+import { Backup, BackupSchema } from './schemas/backup.schema';
 
 @Module({
     imports: [
@@ -66,6 +67,7 @@ import { ChatMessage, ChatMessageSchema } from './schemas/chat-message.schema';
             { name: SearchQueryLog.name, schema: SearchQueryLogSchema },
             { name: Conversation.name, schema: ConversationSchema },
             { name: ChatMessage.name, schema: ChatMessageSchema },
+            { name: Backup.name, schema: BackupSchema },
         ]),
     ],
     exports: [MongooseModule],

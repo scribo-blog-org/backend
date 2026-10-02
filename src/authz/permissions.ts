@@ -9,6 +9,7 @@ export const PERMISSIONS = {
     MANAGE_ROLES: 'manage_roles',
     VIEW_LOGS: 'view_logs',
     MANAGE_SUPPORT: 'manage_support',
+    MANAGE_BACKUPS: 'manage_backups',
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

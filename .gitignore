@@ -16,5 +16,6 @@ coverage
 
 graphify-out/
 
-# local media
+# local media and backups
 uploads
+backups

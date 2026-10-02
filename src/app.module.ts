@@ -21,6 +21,7 @@ import { SearchModule } from './modules/search/search.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { LinkPreviewModule } from './modules/link-preview/link-preview.module';
+import { BackupsModule } from './modules/backups/backups.module';
 import { publicKeyPem } from './config/jwt-keys';
 @Module({
     imports: [
@@ -52,6 +53,7 @@ import { publicKeyPem } from './config/jwt-keys';
         NotificationsModule,
         ChatModule,
         LinkPreviewModule,
+        BackupsModule,
     ],
     controllers: [AppController],
     providers: [
