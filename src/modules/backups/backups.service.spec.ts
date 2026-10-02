@@ -12,45 +12,7 @@ import {
 import { tmpdir } from 'os';
 import path from 'path';
 import { BackupsService } from './backups.service';
-
-type Doc = Record<string, any>;
-
-function matches(doc: Doc, filter: Doc) {
-    return Object.entries(filter).every(([key, want]) => {
-        if (want && typeof want === 'object' && '$ne' in want) {
-            return doc[key] !== want.$ne;
-        }
-        return (doc[key] ?? null) === want;
-    });
-}
-
-function fakeModel() {
-    const docs: Doc[] = [];
-    return {
-        docs,
-        updateMany: jest.fn((filter: Doc, patch: Doc) => {
-            docs.filter((d) => matches(d, filter)).forEach((d) =>
-                Object.assign(d, patch),
-            );
-            return Promise.resolve({});
-        }),
-        create: jest.fn((data: Doc) => {
-            const doc = { _id: String(docs.length + 1), ...data };
-            docs.push(doc);
-            return Promise.resolve({ ...doc, toObject: () => doc });
-        }),
-        updateOne: jest.fn((filter: Doc, patch: Doc) => {
-            Object.assign(docs.find((d) => matches(d, filter)) ?? {}, patch);
-            return Promise.resolve({});
-        }),
-        find: jest.fn((filter: Doc) => ({
-            select: () => ({
-                lean: () =>
-                    Promise.resolve(docs.filter((d) => matches(d, filter))),
-            }),
-        })),
-    };
-}
+import { fakeConnection, fakeModel } from './backups.test-utils';
 
 describe('BackupsService', () => {
     let dir: string;
@@ -68,6 +30,7 @@ describe('BackupsService', () => {
                 MONGODB_URI: "mongodb+srv://u:p'w@host/db",
             }),
             model as any,
+            fakeConnection() as any,
         );
 
     const idle = async (svc: BackupsService) => {
@@ -119,11 +82,11 @@ describe('BackupsService', () => {
         await idle(svc);
 
         const doc = model.docs[0];
-        const day = new Date().toISOString().slice(0, 10);
         expect(doc.status).toBe('success');
-        expect(doc.file_name).toBe(`scribo-${day}.tar`);
+        expect(doc.file_name).toMatch(/^scribo-\d{8}-\d{6}\.tar$/);
         expect(readdirSync(dir)).toEqual([doc.file_name]);
         expect(list(path.join(dir, doc.file_name))).toEqual([
+            'manifest.json',
             'mongo.archive.gz',
             'uploads',
             'uploads/src',
@@ -131,24 +94,59 @@ describe('BackupsService', () => {
         ]);
     });
 
-    it('a second run on the same day overwrites the file and retires the old record', async () => {
+    it("a manual run adds a backup on top of today's and keeps both", async () => {
         fakeDump('printf "first"');
         const model = fakeModel();
         const svc = service(model);
         await svc.start('schedule');
         await idle(svc);
+        // Имя строится по секундам: два бекапа подряд в одну секунду невозможны,
+        // но в тесте они идут вплотную.
+        await new Promise((r) => setTimeout(r, 1100));
         writeFileSync(path.join(uploads, 'src', 'b.png'), 'img');
         await svc.start('manual');
         await idle(svc);
 
-        expect(readdirSync(dir)).toHaveLength(1);
-        expect(model.docs[0].file_removed_reason).toBe('replaced');
-        expect(model.docs[0].file_removed_at).toBeTruthy();
-        expect(model.docs[1].status).toBe('success');
-        expect(model.docs[1].file_removed_at ?? null).toBeNull();
+        expect(readdirSync(dir)).toHaveLength(2);
+        expect(model.docs.every((d) => !d.file_removed_at)).toBe(true);
+        expect(list(path.join(dir, model.docs[0].file_name))).not.toContain(
+            'uploads/src/b.png',
+        );
         expect(list(path.join(dir, model.docs[1].file_name))).toContain(
             'uploads/src/b.png',
         );
+    });
+
+    it('after a new backup keeps one backup for each past day, and all of today', async () => {
+        fakeDump('printf "dump"');
+        const model = fakeModel();
+        const svc = service(model);
+        const day = new Date(Date.now() - 3 * 86_400_000)
+            .toISOString()
+            .slice(0, 10);
+        const old = ['04:00', '20:00'].map((time, i) => {
+            const file = `scribo-old-${i}.tar`;
+            writeFileSync(path.join(dir, file), 'x');
+            const doc = {
+                _id: `old${i}`,
+                status: 'success',
+                kind: 'daily',
+                started_at: new Date(`${day}T${time}:00Z`),
+                file_name: file,
+                file_removed_at: null,
+            };
+            model.docs.push(doc);
+            return doc;
+        });
+
+        await svc.start('manual');
+        await idle(svc);
+
+        expect(old[0].file_removed_at).toBeTruthy();
+        expect((old[0] as any).file_removed_reason).toBe('rotation');
+        expect(existsSync(path.join(dir, 'scribo-old-0.tar'))).toBe(false);
+        expect(old[1].file_removed_at).toBeNull();
+        expect(existsSync(path.join(dir, 'scribo-old-1.tar'))).toBe(true);
     });
 
     it('a failed run keeps the existing backup of the day', async () => {

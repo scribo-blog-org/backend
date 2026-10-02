@@ -1,4 +1,5 @@
 import {
+    Body,
     Controller,
     Get,
     Header,
@@ -16,17 +17,26 @@ import { PERMISSIONS } from '../../authz/permissions';
 import type { Actor } from '../../authz/policy';
 import { PaginationQueryDto } from '../../http/query.dto';
 import { BackupsService } from './backups.service';
+import { BackupRestoreService } from './backups.restore.service';
+import { RestoreBackupDto } from './dto/restore-backup.dto';
 
 @ApiTags('backups')
 @ApiBearerAuth()
 @RequirePermissions(PERMISSIONS.MANAGE_BACKUPS)
 @Controller('backups')
 export class BackupsController {
-    constructor(private readonly backups: BackupsService) {}
+    constructor(
+        private readonly backups: BackupsService,
+        private readonly restores: BackupRestoreService,
+    ) {}
 
     @Get()
     async list(@Query() query: PaginationQueryDto) {
-        const data = await this.backups.list(query);
+        const list = await this.backups.list(query);
+        const data = {
+            ...list,
+            status: { ...list.status, ...(await this.restores.details()) },
+        };
         return { status: true, message: 'Backups fetched successfully!', data };
     }
 
@@ -34,6 +44,17 @@ export class BackupsController {
     async run(@CurrentUser() actor: Actor) {
         const data = await this.backups.start('manual', actor.id);
         return { status: true, message: 'Backup started', data };
+    }
+
+    @Post(':id/restore')
+    @RequirePermissions(PERMISSIONS.MANAGE_BACKUPS, PERMISSIONS.RESTORE_BACKUPS)
+    async restore(
+        @Param('id') id: string,
+        @Body() _dto: RestoreBackupDto,
+        @CurrentUser() actor: Actor,
+    ) {
+        const data = await this.restores.start(id, actor.id);
+        return { status: true, message: 'Restore started', data };
     }
 
     @Get(':id/download')
