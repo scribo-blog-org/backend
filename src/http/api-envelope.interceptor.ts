@@ -3,6 +3,7 @@ import {
     ExecutionContext,
     Injectable,
     NestInterceptor,
+    StreamableFile,
 } from '@nestjs/common';
 import { map, Observable } from 'rxjs';
 
@@ -14,6 +15,10 @@ export class ApiEnvelopeInterceptor implements NestInterceptor {
     ): Observable<unknown> {
         return next.handle().pipe(
             map((payload: unknown) => {
+                if (payload instanceof StreamableFile) {
+                    return payload;
+                }
+
                 if (
                     payload &&
                     typeof payload === 'object' &&

@@ -12,6 +12,7 @@ import { UsersModule } from './modules/users/users.module';
 import { ProfileModule } from './modules/profile/profile.module';
 import { CategoriesModule } from './modules/categories/categories.module';
 import { PostsModule } from './modules/posts/posts.module';
+import { FilesModule } from './files/files.module';
 import { InfraModule } from './infra/infra.module';
 import { SupportModule } from './modules/support/support.module';
 import { LogsModule } from './modules/logs/logs.module';
@@ -20,6 +21,7 @@ import { SearchModule } from './modules/search/search.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { LinkPreviewModule } from './modules/link-preview/link-preview.module';
+import { BackupsModule } from './modules/backups/backups.module';
 import { publicKeyPem } from './config/jwt-keys';
 @Module({
     imports: [
@@ -36,6 +38,7 @@ import { publicKeyPem } from './config/jwt-keys';
             }),
         }),
         DatabaseModule,
+        FilesModule,
         InfraModule,
         AuthzModule,
         AuthModule,
@@ -50,6 +53,7 @@ import { publicKeyPem } from './config/jwt-keys';
         NotificationsModule,
         ChatModule,
         LinkPreviewModule,
+        BackupsModule,
     ],
     controllers: [AppController],
     providers: [

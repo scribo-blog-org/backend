@@ -8,10 +8,12 @@ RUN npm run build
 FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
+# mongodump и GNU tar для бекапов из админки (в busybox tar нет гарантий по нескольким -C и кодам возврата).
+RUN apk add --no-cache mongodb-tools tar
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
-RUN chown -R node:node /app
+RUN mkdir -p /app/uploads /app/backups && chown -R node:node /app
 USER node
 EXPOSE 3001
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=5 \

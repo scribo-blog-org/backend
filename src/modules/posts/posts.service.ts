@@ -9,7 +9,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { PERMISSIONS } from '../../authz/permissions';
 import { hasPermission, isResourceOwner, type Actor } from '../../authz/policy';
-import { StorageService } from '../../infra/storage.service';
+import { FilesService } from '../../files/files.service';
 import { LoggerService } from '../../infra/logger.service';
 import { parsePagination } from '../../http/pagination';
 import type { ListPostsQueryDto } from '../../http/query.dto';
@@ -36,7 +36,7 @@ export class PostsService {
         private readonly usersService: UsersService,
         private readonly notifications: NotificationsService,
         private readonly mentionNotifications: MentionNotificationsService,
-        private readonly storage: StorageService,
+        private readonly files: FilesService,
         private readonly logger: LoggerService,
     ) {}
 
@@ -237,7 +237,7 @@ export class PostsService {
 
         let imgUrl: string | null = null;
         if (featuredImage && featuredImage.size !== 0) {
-            imgUrl = await this.storage.uploadImage(
+            imgUrl = await this.files.saveImage(
                 featuredImage,
                 'featured_image',
                 Date.now().toString(),
@@ -314,9 +314,9 @@ export class PostsService {
             featuredImage !== undefined ||
             Object.prototype.hasOwnProperty.call(data, 'featuredImage');
         if (shouldTouchImage) {
-            await this.storage.deleteFile(post.featured_image);
+            await this.files.remove(post.featured_image);
             if (featuredImage && featuredImage.size !== 0) {
-                const uploaded = await this.storage.uploadImage(
+                const uploaded = await this.files.saveImage(
                     featuredImage,
                     'featured_image',
                     Date.now().toString(),
@@ -382,7 +382,7 @@ export class PostsService {
         if (!result) {
             throw new InternalServerErrorException('Failed to delete post!');
         }
-        await this.storage.deleteFile(result.featured_image);
+        await this.files.remove(result.featured_image);
 
         if (commentIds.length) {
             await this.usersService.removeNotifications({

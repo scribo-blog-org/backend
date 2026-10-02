@@ -9,14 +9,14 @@ HTTP API блога. Аккаунты, посты, комментарии, по�
 ```
 браузер  --HTTPS /api-->  nginx  -->  этот процесс :3001
                                       ├─ MongoDB Atlas
-                                      ├─ S3
+                                      ├─ файлы на диске (UPLOADS_DIR)
                                       ├─ почта
                                       └─ Redis publish scribo:events
 ```
 
 Порт 3001 снаружи машины не открыт. Клиент ходит на публичный хост, nginx срезает префикс пути и проксирует его сюда как есть: `/api/posts` на входе nginx остаётся `/api/posts` у Nest.
 
-Старт печатает три строки и больше ничего штатного: Mongo подключена, S3 доступна, порт слушается. Карту маршрутов Nest в лог не пишет. Ошибки и предупреждения остаются.
+Старт печатает три строки и больше ничего штатного: Mongo подключена, каталог загрузок готов, порт слушается. Карту маршрутов Nest в лог не пишет. Ошибки и предупреждения остаются.
 
 ## Стек
 
@@ -26,7 +26,7 @@ HTTP API блога. Аккаунты, посты, комментарии, по�
 | Framework | NestJS 11, адаптер Express |
 | База | MongoDB, Mongoose |
 | Доступ | RS256. Access JWT в `Authorization: Bearer`. Refresh — отдельный секрет, httpOnly cookie `refresh_token` |
-| Файлы | AWS S3 |
+| Файлы | Локальный диск, отдаются backend по `/api/uploads/...` |
 | Почта | Nodemailer, Gmail |
 | События | Redis, канал `scribo:events` |
 | Контракт | OpenAPI 3, Swagger |
@@ -49,7 +49,7 @@ HTTP API блога. Аккаунты, посты, комментарии, по�
 
 ## Требования
 
-Node.js 22. MongoDB, Atlas или локальная. Для загрузок — S3. Для писем — пароль приложения Gmail. Для событий — Redis. На проде Redis поднимает compose из `infra`.
+Node.js 22. MongoDB, Atlas или локальная. Для загрузок — каталог на диске. Для писем — пароль приложения Gmail. Для событий — Redis. На проде Redis поднимает compose из `infra`.
 
 ## Локальный запуск
 
@@ -87,10 +87,77 @@ npm run start:dev
 | `FRONTEND_ORIGIN` | да в проде | CORS и ссылки в письмах, без слэша на конце |
 | `API_ORIGIN` | нет | Публичный origin в OpenAPI |
 | `MAIL_SENDER`, `MAIL_PASSWORD` | для почты | Ящик Gmail и пароль приложения |
-| `AWS_CONNECT_ACCESS_KEY`, `AWS_CONNECT_SECRET_ACCESS_KEY`, `AWS_CONNECT_REGION`, `AWS_CONNECT_BUCKET_NAME` | для загрузок | S3 |
+| `UPLOADS_DIR` | нет | Каталог загрузок, по умолчанию `./uploads`. В Docker это `/app/uploads`, папка окружения на хосте |
+| `UPLOADS_PUBLIC_URL` | нет | Публичный адрес каталога, по умолчанию `<API_ORIGIN>/uploads` |
+| `SERVE_UPLOADS` | нет | `true`/`false`: отдавать ли `/uploads` из Node. По умолчанию включено вне production |
+| `BACKUP_ENABLED` | нет | `true` включает бекапы (расписание и кнопка в админке), по умолчанию выключены |
+| `BACKUPS_DIR` | нет | Каталог архивов, по умолчанию `./backups`. В Docker это `/app/backups`, папка окружения на хосте |
+| `BACKUP_AT` | нет | Время ежедневного запуска по UTC, по умолчанию `04:15` |
+| `BACKUP_KEEP_DAILY_DAYS` | нет | Сколько последних суток хранить каждый день, по умолчанию `7` |
+| `BACKUP_KEEP_MONTHS` | нет | За сколько месяцев хранить по одной копии на месяц, по умолчанию `12` |
+| `MONGODUMP_BIN`, `TAR_BIN` | нет | Пути к `mongodump` и `tar`, по умолчанию берутся из PATH |
 | `REDIS_URL` | да | С хоста `redis://127.0.0.1:6379`. В compose `redis://redis:6379` |
 
 \* Либо `MONGODB_URI`, либо все четыре `DB_*`.
+
+## Файлы
+
+Работа с файлами вынесена в слой `src/files`, как база в `src/database`. Сервисы приложения зовут только `FilesService.saveImage(...)` и `FilesService.remove(url)`; где и как файлы лежат, знает только этот слой (`FilesDisk` пишет на диск, `files.config.ts` считает пути и ссылки).
+
+Аватары и картинки постов лежат в `UPLOADS_DIR/src/avatar` и `UPLOADS_DIR/src/featured_image` (файлы 644, каталоги 755). В базе хранится публичная ссылка `<UPLOADS_PUBLIC_URL>/src/...`, по умолчанию `<API_ORIGIN>/uploads/src/...`.
+
+В проде каталог отдаёт nginx из стека edge, напрямую с тома и только на чтение: Node картинки не читает и не гонит. В dev, без nginx, их отдаёт сам backend (`SERVE_UPLOADS`, по умолчанию включено вне `NODE_ENV=production`). Старые ссылки на S3 остаются в базе и открываются как раньше, но при удалении поста или смене аватара такие файлы не удаляются. `backend/uploads` в git не попадает.
+
+## Бекапы
+
+Модуль `src/modules/backups`. Бекап — один файл `scribo-ГГГГ-ММ-ДД.tar` в `BACKUPS_DIR`, внутри:
+
+```
+mongo.archive.gz      дамп Mongo (mongodump --gzip --archive)
+uploads/              каталог загрузок целиком (UPLOADS_DIR)
+```
+
+Запускается ежедневно в `BACKUP_AT` (UTC) и по кнопке на вкладке «Бекапы» админки. Вкладка и API (`/api/backups`) доступны только роли `tech_admin`: в архиве хэши паролей и вся переписка.
+
+**Один файл на день.** Имя файла — день по UTC. Ручной запуск перезаписывает сегодняшний бекап, а если сегодня бекапа ещё не было, создаёт новый. Архив собирается во временный файл и подменяет прежний атомарно, поэтому упавший запуск не затирает хороший бекап дня. У записи заменённого бекапа в истории пропадает кнопка «Скачать».
+
+**Хранение.** Каждый день за последние `BACKUP_KEEP_DAILY_DAYS` суток (7), дальше по одной копии на месяц: самая ранняя копия месяца живёт `BACKUP_KEEP_MONTHS` месяцев (12). Остальные удаляются после каждого успешного бекапа. Записи в истории остаются.
+
+Каждый запуск пишет запись в коллекцию `backups`: время, тип (`schedule` или `manual`), статус (`running`, `success`, `failed`), размер, ошибка и кто запустил. Одновременно идёт один бекап. Записи `running`, оставшиеся после падения процесса, при старте помечаются `failed`, а недособранные временные файлы удаляются.
+
+Строка подключения передаётся `mongodump` через временный файл 0600, а не аргументом, поэтому пароля нет ни в списке процессов, ни в ошибках в истории. Во время сборки архива рядом с готовыми файлами лежит временный дамп Mongo, так что на диске нужен запас примерно на один лишний бекап.
+
+`BACKUP_ENABLED=false` отключает всё: расписание не стартует, ручной запуск отвечает 409. На стейдже ставим `false`.
+
+Восстановление ручное. Распаковать архив, затем:
+
+```bash
+tar -xf scribo-2026-10-02.tar
+mongorestore --gzip --archive=mongo.archive.gz --uri="$MONGODB_URI" --drop
+cp -a uploads/. /srv/scribo/prod/uploads/
+```
+
+В образе `mongodump` и GNU `tar` ставятся пакетами Alpine `mongodb-tools` и `tar`. Локально нужны установленные `mongodump` и `tar`.
+
+## Локальная Mongo в Docker
+
+Из `infra/local` в репозитории infra: `docker compose up -d --build` поднимает всё (Mongo, Redis, backend, socket, frontend), `docker compose down` останавливает, `docker compose up -d redis mongo` поднимает только Redis и Mongo. Данные Mongo стирает `docker compose down -v`.
+
+Приложения можно запускать и вручную, а в Docker держать только Mongo и Redis:
+
+Из каталога репозитория infra:
+
+```bash
+cd infra/local && docker compose up -d mongo redis
+```
+
+В `backend/.env` и `socket/.env` поставить:
+
+```
+MONGODB_URI=mongodb://scribo:scribo@127.0.0.1:27017/scribo?authSource=admin
+```
+
+`MONGODB_URI` приоритетнее `DB_*`: чтобы вернуться на Atlas, закомментируйте эту строку. У socket дополнительно нужен `DB_NAME=scribo` (имя базы должно совпадать с backend). Данные живут в томе `scribo-mongo-data`; `docker compose down -v` стирает их. Смотреть данные: `docker exec -it scribo-mongo mongosh -u scribo -p scribo --authenticationDatabase admin scribo`.
 
 Закрытый ключ и секрет refresh на сокет не передаются. Сокет умеет только проверять access token открытым ключом.
 
@@ -112,14 +179,14 @@ npm run test:cov
 
 ```
 src/
-  main.ts              старт, проверка Mongo и S3, порт
+  main.ts              старт, проверка Mongo и каталога загрузок, порт
   create-app.ts        CORS, cookie, валидация, Swagger
   app.module.ts
   authz/               guard JWT, роли, права
   http/                конверт ответа, ошибки, лимиты
   visitor/             IP, гео, устройство
   validation/          лимиты полей и DTO
-  infra/               почта, S3, журнал в Mongo, проверки старта
+  infra/               почта, локальное хранилище, журнал в Mongo, проверки старта
   config/              env, URI Mongo, ключи JWT
   database/            Mongoose и схемы
   socket/              публикация событий в Redis

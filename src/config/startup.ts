@@ -5,10 +5,6 @@ const REQUIRED_ENV = [
     'JWT_PRIVATE_KEY',
     'JWT_PUBLIC_KEY',
     'REDIS_URL',
-    'AWS_CONNECT_ACCESS_KEY',
-    'AWS_CONNECT_SECRET_ACCESS_KEY',
-    'AWS_CONNECT_REGION',
-    'AWS_CONNECT_BUCKET_NAME',
 ] as const;
 
 export function assertSetup(env: NodeJS.ProcessEnv) {

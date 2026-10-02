@@ -33,5 +33,6 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
         PERMISSIONS.MANAGE_ROLES,
         PERMISSIONS.VIEW_LOGS,
         PERMISSIONS.MANAGE_SUPPORT,
+        PERMISSIONS.MANAGE_BACKUPS,
     ],
 };

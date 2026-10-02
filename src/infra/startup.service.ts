@@ -1,13 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
-import { StorageService } from './storage.service';
+import { FilesService } from '../files/files.service';
 
 @Injectable()
 export class StartupService {
     constructor(
         @InjectConnection() private readonly connection: Connection,
-        private readonly storage: StorageService,
+        private readonly files: FilesService,
     ) {}
 
     async assertDatabase() {
@@ -23,8 +23,8 @@ export class StartupService {
         );
     }
 
-    async assertAws() {
-        const { bucket, region } = await this.storage.assertReady();
-        console.log(`backend aws connected bucket=${bucket} region=${region}`);
+    async assertFiles() {
+        const { dir, publicUrl } = await this.files.assertReady();
+        console.log(`backend files ready dir=${dir} url=${publicUrl}`);
     }
 }
