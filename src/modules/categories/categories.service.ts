@@ -11,6 +11,7 @@ import { PERMISSIONS } from '../../authz/permissions';
 import { hasPermission, type Actor } from '../../authz/policy';
 import { fieldError } from '../../http/http-errors';
 import { LoggerService } from '../../infra/logger.service';
+import { categorySnapshot, changeOf, compact } from '../../infra/log-helpers';
 import { Category } from '../../database/schemas/category.schema';
 import { Post } from '../../database/schemas/post.schema';
 
@@ -63,11 +64,15 @@ export class CategoriesService {
             icon: data.categoryIcon,
             color: data.categoryColor,
         });
-        await this.logger.log({
-            type: 'create_category',
-            message: `User ${actor.nick_name} created category`,
-            data: { user: actor.id, category: result._id },
-        });
+        await this.logger.action(
+            'create_category',
+            actor,
+            {
+                category: result._id,
+                category_snapshot: categorySnapshot(result),
+            },
+            `User ${actor.nick_name} created category`,
+        );
         return result;
     }
 
@@ -115,11 +120,23 @@ export class CategoriesService {
         const posts = await this.posts.countDocuments({
             category: new Types.ObjectId(id),
         });
-        await this.logger.log({
-            type: 'update_category',
-            message: `User ${actor.nick_name} updated category`,
-            data: { user: actor.id, category: result._id },
-        });
+        const changes = compact([
+            changeOf('name', category.name, result.name),
+            changeOf('icon', category.icon, result.icon),
+            changeOf('color', category.color, result.color),
+        ]);
+        if (changes.length) {
+            await this.logger.action(
+                'update_category',
+                actor,
+                {
+                    category: result._id,
+                    category_snapshot: categorySnapshot(result),
+                    changes,
+                },
+                `User ${actor.nick_name} updated category`,
+            );
+        }
         return { ...result, posts_count: posts };
     }
 
@@ -142,11 +159,12 @@ export class CategoriesService {
             );
         }
         await this.categories.findByIdAndDelete(id);
-        await this.logger.log({
-            type: 'delete_category',
-            message: `User ${actor.nick_name} deleted category`,
-            data: { user: actor.id, category: id },
-        });
+        await this.logger.action(
+            'delete_category',
+            actor,
+            { category: id, category_snapshot: categorySnapshot(category) },
+            `User ${actor.nick_name} deleted category`,
+        );
         return category;
     }
 }

@@ -14,6 +14,7 @@ import { Post } from '../../database/schemas/post.schema';
 import { PostComment } from '../../database/schemas/post-comment.schema';
 import { UsersService } from '../users/users.service';
 import { LoggerService } from '../../infra/logger.service';
+import { textPreview } from '../../infra/log-helpers';
 
 function postIdMatch(id: Types.ObjectId | string) {
     const objectId =
@@ -208,15 +209,19 @@ export class CommentsService {
                 commentId: String(result._id),
                 excludeUserIds: [actor.id],
             });
-            await this.logger.log({
-                type: 'reply_comment',
-                message: `User ${actor.nick_name} replied to comment ${parentCommentId}`,
-                data: {
+            await this.logger.action(
+                'reply_comment',
+                actor,
+                {
                     post: postId,
+                    post_title: post.title,
                     comment: String(result._id),
-                    user: actor.id,
+                    comment_text: textPreview(commentText),
+                    parent_comment: parentCommentId,
+                    target_user: String(parent.author),
                 },
-            });
+                `User ${actor.nick_name} replied to comment ${parentCommentId}`,
+            );
             return result.toObject();
         }
 
@@ -247,15 +252,17 @@ export class CommentsService {
             commentId: String(result._id),
             excludeUserIds: [actor.id],
         });
-        await this.logger.log({
-            type: 'comment_post',
-            message: `User ${actor.nick_name} commented on post ${postId}`,
-            data: {
+        await this.logger.action(
+            'comment_post',
+            actor,
+            {
                 post: postId,
+                post_title: post.title,
                 comment: String(result._id),
-                user: actor.id,
+                comment_text: textPreview(commentText),
             },
-        });
+            `User ${actor.nick_name} commented on post ${postId}`,
+        );
         return result.toObject();
     }
 
@@ -281,16 +288,19 @@ export class CommentsService {
         const ids = this.idsToDelete(comments, root._id);
         const result = await this.comments.deleteMany({ _id: { $in: ids } });
         await this.users.removeNotifications({ comment: { $in: ids } });
-        await this.logger.log({
-            type: 'delete_comment',
-            message: `User ${actor.nick_name} deleted comment ${commentId}`,
-            data: {
+        await this.logger.action(
+            'delete_comment',
+            actor,
+            {
                 post: String(root.post_id),
+                post_title: await this.postTitle(root.post_id),
                 comment: commentId,
-                user: actor.id,
+                comment_text: textPreview(root.comment_text),
+                comment_author: String(root.author),
                 removed: ids.length,
             },
-        });
+            `User ${actor.nick_name} deleted comment ${commentId}`,
+        );
         return result;
     }
 
@@ -350,15 +360,28 @@ export class CommentsService {
                 },
             );
         }
-        await this.logger.log({
-            type: 'update_comment',
-            message: `User ${actor.nick_name} edited comment ${commentId}`,
-            data: {
-                post: String(comment.post_id),
-                comment: commentId,
-                user: actor.id,
-            },
-        });
+        if (
+            commentText !== undefined &&
+            String(comment.comment_text ?? '') !== commentText
+        ) {
+            await this.logger.action(
+                'update_comment',
+                actor,
+                {
+                    post: String(comment.post_id),
+                    post_title: await this.postTitle(comment.post_id),
+                    comment: commentId,
+                    changes: [
+                        {
+                            field: 'text',
+                            from: textPreview(comment.comment_text),
+                            to: textPreview(commentText),
+                        },
+                    ],
+                },
+                `User ${actor.nick_name} edited comment ${commentId}`,
+            );
+        }
         return updated;
     }
 
@@ -372,13 +395,21 @@ export class CommentsService {
         if ((comment.likes || []).some((id) => String(id) === actor.id)) {
             throw new ConflictException('You have already liked this comment!');
         }
-        return this.comments
+        const liked = await this.comments
             .findByIdAndUpdate(
                 commentId,
                 { $addToSet: { likes: actor.id } },
                 { returnDocument: 'after', runValidators: true },
             )
             .lean();
+        await this.logger.action('like_comment', actor, {
+            post: String(comment.post_id),
+            post_title: await this.postTitle(comment.post_id),
+            comment: commentId,
+            comment_text: textPreview(comment.comment_text),
+            comment_author: String(comment.author),
+        });
+        return liked;
     }
 
     async unlike(commentId: string, actor: Actor) {
@@ -391,12 +422,29 @@ export class CommentsService {
         if (!(comment.likes || []).some((id) => String(id) === actor.id)) {
             throw new ConflictException('You have not liked this comment!');
         }
-        return this.comments
+        const unliked = await this.comments
             .findByIdAndUpdate(
                 commentId,
                 { $pull: { likes: actor.id } },
                 { returnDocument: 'after', runValidators: true },
             )
             .lean();
+        await this.logger.action('unlike_comment', actor, {
+            post: String(comment.post_id),
+            post_title: await this.postTitle(comment.post_id),
+            comment: commentId,
+            comment_text: textPreview(comment.comment_text),
+            comment_author: String(comment.author),
+        });
+        return unliked;
+    }
+
+    /** Заголовок поста для записи журнала: пост могут удалить, а запись останется. */
+    private async postTitle(postId: unknown): Promise<string | null> {
+        const post = await this.posts
+            .findById(postId)
+            .select('title')
+            .lean<{ title?: string }>();
+        return post?.title ?? null;
     }
 }

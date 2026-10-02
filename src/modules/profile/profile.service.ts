@@ -12,6 +12,8 @@ import { fieldError } from '../../http/http-errors';
 import { comparePassword, setPasswordHash } from '../auth/password';
 import { UsersService } from '../users/users.service';
 import { MailService } from '../../infra/mail.service';
+import { LoggerService } from '../../infra/logger.service';
+import { changeOf, compact, textPreview } from '../../infra/log-helpers';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()
@@ -21,6 +23,7 @@ export class ProfileService {
         private readonly files: FilesService,
         private readonly mail: MailService,
         private readonly config: ConfigService,
+        private readonly logger: LoggerService,
     ) {}
 
     withAccessRole(user: Record<string, unknown> | null, actor?: Actor) {
@@ -112,6 +115,58 @@ export class ProfileService {
         }
 
         const result = await this.users.updateById(actor.id, mongoFields);
+
+        const before = stored as unknown as Record<string, unknown>;
+        const changes = compact([
+            'nick_name' in mongoFields
+                ? changeOf('nick_name', before.nick_name, mongoFields.nick_name)
+                : null,
+            'description' in mongoFields &&
+            String(before.description ?? '') !==
+                String(mongoFields.description ?? '')
+                ? {
+                      field: 'description',
+                      from: textPreview(before.description, 80),
+                      to: textPreview(mongoFields.description, 80),
+                  }
+                : null,
+            'is_email_public' in mongoFields
+                ? changeOf(
+                      'is_email_public',
+                      before.is_email_public,
+                      mongoFields.is_email_public,
+                  )
+                : null,
+            'is_saved_posts_public' in mongoFields
+                ? changeOf(
+                      'is_saved_posts_public',
+                      before.is_saved_posts_public,
+                      mongoFields.is_saved_posts_public,
+                  )
+                : null,
+            'is_last_activity_public' in mongoFields
+                ? changeOf(
+                      'is_last_activity_public',
+                      before.is_last_activity_public,
+                      mongoFields.is_last_activity_public,
+                  )
+                : null,
+            'avatar' in mongoFields
+                ? {
+                      field: 'avatar',
+                      to: mongoFields.avatar
+                          ? before.avatar
+                              ? 'changed'
+                              : 'added'
+                          : before.avatar
+                            ? 'removed'
+                            : null,
+                  }
+                : null,
+        ]).filter((item) => item.field !== 'avatar' || item.to !== null);
+        if (changes.length) {
+            await this.logger.action('update_profile', actor, { changes });
+        }
         return this.withAccessRole(result as never, actor);
     }
 

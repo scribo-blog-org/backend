@@ -75,6 +75,15 @@ export function fakeModel() {
     };
 }
 
+export function fakeLogger() {
+    return {
+        log: jest.fn().mockResolvedValue(undefined),
+        action: jest.fn().mockResolvedValue(undefined),
+        system: jest.fn().mockResolvedValue(undefined),
+        error: jest.fn().mockResolvedValue(undefined),
+    };
+}
+
 export function fakeConnection(collections: string[] = ['users', 'posts']) {
     const names = [...collections];
     return {

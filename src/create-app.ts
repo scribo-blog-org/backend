@@ -10,6 +10,8 @@ import {
     uploadsDir,
 } from './files/files.config';
 import { ApiExceptionFilter } from './http/api-exception.filter';
+import { LoggerService } from './infra/logger.service';
+import { requestContextMiddleware } from './infra/request-context';
 import { openApiDocument } from './http/openapi-document';
 import { ScriboValidationPipe } from './http/scribo-validation.pipe';
 
@@ -22,6 +24,14 @@ function isLocalBrowserOrigin(origin: string): boolean {
         );
     } catch {
         return false;
+    }
+}
+
+function loggerOf(app: INestApplication): LoggerService | undefined {
+    try {
+        return app.get(LoggerService, { strict: false });
+    } catch {
+        return undefined;
     }
 }
 
@@ -44,6 +54,7 @@ export async function configureScriboApp(
         exclude: [{ path: 'health', method: RequestMethod.GET }],
     });
     app.use(cookieParser());
+    app.use(requestContextMiddleware);
     // В проде каталог отдаёт nginx мимо Node. Здесь это только для разработки.
     if (backendServesUploads(process.env)) {
         (app as NestExpressApplication).useStaticAssets(
@@ -65,7 +76,7 @@ export async function configureScriboApp(
         );
     }
     app.useGlobalPipes(new ScriboValidationPipe());
-    app.useGlobalFilters(new ApiExceptionFilter());
+    app.useGlobalFilters(new ApiExceptionFilter(loggerOf(app)));
     app.enableCors({
         origin: (
             requestOrigin: string | undefined,

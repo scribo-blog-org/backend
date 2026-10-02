@@ -21,6 +21,7 @@ import {
 import { Connection, Model, Types } from 'mongoose';
 import path from 'path';
 import { mongoUri } from '../../config/startup';
+import { LoggerService } from '../../infra/logger.service';
 import {
     Backup,
     type BackupTrigger,
@@ -72,6 +73,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         config: ConfigService,
         @InjectModel(Backup.name) private readonly backups: Model<Backup>,
         @InjectConnection() private readonly connection: Connection,
+        private readonly logger: LoggerService,
     ) {
         this.cfg = backupsConfig(config);
         this.uri = () => mongoUri(config);
@@ -281,7 +283,15 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         trigger: BackupTrigger,
     ) {
         try {
-            await this.produce(id, day, 'daily', trigger);
+            const error = await this.produce(id, day, 'daily', trigger);
+            if (error) {
+                // Тихо упавший бекап хуже всего: в журнале его должно быть видно.
+                await this.logger.system(
+                    'backup_failed',
+                    `Backup failed (${trigger}): ${error}`,
+                    { trigger, backup: String(id), error },
+                );
+            }
             await this.prune().catch((e) =>
                 console.error('backup prune failed', e),
             );
