@@ -12,7 +12,6 @@ import type { Actor } from '../../authz/policy';
 import { DEFAULT_ROLE, type Role } from '../../authz/roles';
 import { LoggerService } from '../../infra/logger.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { tryConsume } from '../../http/rate-limit.guard';
 import { Session } from '../../database/schemas/session.schema';
 import { User } from '../../database/schemas/user.schema';
 
@@ -41,24 +40,6 @@ export class UsersService implements OnModuleInit {
         private readonly logger: LoggerService,
         private readonly notificationsService: NotificationsService,
     ) {}
-
-    touchLastActivity(userId: string) {
-        if (!userId || !Types.ObjectId.isValid(userId)) {
-            return;
-        }
-        if (!tryConsume(`last-activity:${userId}`, 10_000, 1)) {
-            return;
-        }
-
-        setImmediate(() => {
-            void this.users.collection
-                .updateOne(
-                    { _id: new Types.ObjectId(userId) },
-                    { $set: { last_activity_at: new Date() } },
-                )
-                .catch(() => undefined);
-        });
-    }
 
     async onModuleInit() {
         await this.users.collection.updateMany(
@@ -308,10 +289,12 @@ export class UsersService implements OnModuleInit {
         email: string;
         description?: string;
     }) {
+        const registeredAt = new Date();
         const created = await this.users.create({
             ...data,
             role: DEFAULT_ROLE,
-            last_activity_at: new Date(),
+            created_date: registeredAt,
+            last_activity_at: registeredAt,
             is_last_activity_public: true,
         });
         return this.sanitize(created.toObject() as UserLean);
