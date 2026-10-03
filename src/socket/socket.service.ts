@@ -33,10 +33,7 @@ export class SocketService {
             });
     }
 
-    chatMessagesDeleted(
-        conversationId: string,
-        ids: string[],
-    ): Promise<void> {
+    chatMessagesDeleted(conversationId: string, ids: string[]): Promise<void> {
         return this.socketEvents
             .chatMessagesDeleted(conversationId, ids)
             .catch((error: unknown) => {

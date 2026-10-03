@@ -659,9 +659,7 @@ export class ChatService {
                 $set: {
                     last_message_id: latest?._id ?? null,
                     last_message_text: latest?.text ?? '',
-                    last_message_at: latest
-                        ? this.messageDate(latest)
-                        : null,
+                    last_message_at: latest ? this.messageDate(latest) : null,
                 },
             });
             await this.pushConversationUpdate(

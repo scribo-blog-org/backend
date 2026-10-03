@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../authz/decorators/current-user.decorator';
-import { OptionalAuth, Public } from '../../authz/decorators/public.decorator';
+import { OptionalAuth } from '../../authz/decorators/public.decorator';
 import { RequirePermissions } from '../../authz/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '../../authz/permissions';
 import type { Actor } from '../../authz/policy';
