@@ -1,4 +1,3 @@
-/** Visible @nick in plain text or HTML (nick 3–24 chars). */
 const MENTION_IN_TEXT = /@[a-zA-Z0-9_]{3,24}/g;
 const LEGACY_MENTION = /@\[user:[a-f0-9]{24}\]/gi;
 

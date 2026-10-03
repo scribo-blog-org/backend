@@ -14,6 +14,7 @@ import type { Actor } from '../../authz/policy';
 import { ChatService } from './chat.service';
 import {
     CreateConversationDto,
+    DeleteMessagesDto,
     EditMessageDto,
     ListMessagesQueryDto,
     SendMessageDto,
@@ -91,6 +92,15 @@ export class ChatController {
     async markRead(@Param('id') id: string, @CurrentUser() actor: Actor) {
         const data = await this.chat.markRead(id, actor);
         return { status: true, message: 'Conversation marked as read', data };
+    }
+
+    @Post('messages/bulk-delete')
+    async deleteMessages(
+        @Body() dto: DeleteMessagesDto,
+        @CurrentUser() actor: Actor,
+    ) {
+        const data = await this.chat.deleteMessages(dto.ids, actor);
+        return { status: true, message: 'Messages deleted', data };
     }
 
     @Delete('messages/:id')

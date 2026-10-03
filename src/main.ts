@@ -22,7 +22,6 @@ async function bootstrap() {
         const port = process.env.PORT ?? '3001';
         await app.listen(port, '0.0.0.0');
         console.log(`backend ready port=${port}`);
-        // После listen, чтобы в журнале были только запуски, дошедшие до рабочего состояния.
         await app
             .get(LoggerService)
             .system('server_start', `Server started on port ${port}`, {

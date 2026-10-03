@@ -2,7 +2,7 @@ import { generateKeyPair, exportJWK } from 'jose';
 
 const { publicKey, privateKey } = await generateKeyPair('RS256', {
     modulusLength: 2048,
-    extractable: true, // <--- добавляем этот параметр
+    extractable: true,
 });
 
 const privateJwk = await exportJWK(privateKey);

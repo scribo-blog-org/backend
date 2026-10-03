@@ -193,12 +193,12 @@ export class ProfileService {
         },
     ) {
         if (input.newPassword !== input.newPasswordConfirm) {
-            throw fieldError('newPasswordConfirm', 'Пароли не совпадают');
+            throw fieldError('newPasswordConfirm', 'Passwords do not match');
         }
         if (input.currentPassword === input.newPassword) {
             throw fieldError(
                 'newPassword',
-                'Новый пароль должен отличаться от текущего',
+                'The new password must be different from the current one',
             );
         }
         const user = await this.users.getById(actor.id, { withPassword: true });
@@ -208,11 +208,14 @@ export class ProfileService {
         if (!user.password) {
             throw fieldError(
                 'currentPassword',
-                'Для этого аккаунта нельзя сменить пароль',
+                'This account cannot change its password',
             );
         }
         if (!(await comparePassword(input.currentPassword, user.password))) {
-            throw fieldError('currentPassword', 'Неверный текущий пароль');
+            throw fieldError(
+                'currentPassword',
+                'Current password is incorrect',
+            );
         }
         await this.users.updateById(actor.id, {
             password: setPasswordHash(input.newPassword),

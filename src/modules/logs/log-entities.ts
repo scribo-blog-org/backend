@@ -1,9 +1,3 @@
-/**
- * Поиск сущностей по журналу. Журнал хранит id и снимки названий, поэтому
- * искать можно и то, чего уже нет: удалённый пост, переименованную категорию.
- * Для живых сущностей берётся текущее имя, для удалённых снимок из журнала.
- * Записи без имени ни там, ни там в подсказки не попадают.
- */
 import type { PipelineStage } from 'mongoose';
 
 export type LogEntityType = 'user' | 'post' | 'category';
@@ -12,7 +6,6 @@ export type LogEntity = {
     type: LogEntityType;
     id: string;
     name: string;
-    /** Сколько записей журнала касается сущности. */
     count: number;
     last: Date;
 };
@@ -33,7 +26,6 @@ const entry = (type: LogEntityType, id: string, name: string) => ({
     name,
 });
 
-/** Живое имя по id из строки: если id не ObjectId, поиск ничего не находит. */
 const live = (from: string, field: string, as: string): PipelineStage[] => [
     {
         $lookup: {
@@ -57,11 +49,6 @@ const live = (from: string, field: string, as: string): PipelineStage[] => [
     },
 ];
 
-/**
- * Конвейер: каждая запись разворачивается в сущности, о которых она (автор,
- * адресат, пост, категория), потом они группируются, получают живое имя и
- * фильтруются по поиску.
- */
 export function entitiesPipeline(options: {
     regex: RegExp | null;
     collections: EntityCollections;
@@ -89,7 +76,6 @@ export function entitiesPipeline(options: {
         },
         { $unwind: '$e' },
         { $match: { 'e.id': { $nin: [null, ''] } } },
-        // Первой в группе должна быть запись с именем, потом самая свежая.
         {
             $addFields: {
                 hasName: { $cond: [{ $ifNull: ['$e.name', false] }, 1, 0] },

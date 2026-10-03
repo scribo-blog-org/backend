@@ -6,22 +6,15 @@ type Env = Pick<ConfigService, 'get'>;
 
 export type BackupsConfig = {
     enabled: boolean;
-    /** Откат из админки. Включается отдельно от самих бекапов. */
     restoreEnabled: boolean;
     dir: string;
     mongodump: string;
     mongorestore: string;
-    /** Время ежедневного запуска по UTC, часы и минуты. */
     at: { hour: number; minute: number };
-    /** Сколько последних суток хранить по бекапу на день (за сегодня все). */
     keepDailyDays: number;
-    /** Сколько месяцев назад хранить по одной копии на месяц. */
     keepMonths: number;
-    /** Сколько страховочных снимков перед откатом хранить. */
     keepPreRestore: number;
-    /** Сколько загруженных вручную архивов хранить. */
     keepUploaded: number;
-    /** Самый большой архив, который принимает загрузка, в байтах. */
     uploadMaxBytes: number;
     uploadsDir: string;
     tar: string;
@@ -78,7 +71,6 @@ export function backupsConfig(config: Env): BackupsConfig {
     };
 }
 
-/** Миллисекунды до ближайшего ежедневного запуска по UTC. */
 export function msUntilNextRun(
     at: { hour: number; minute: number },
     now: Date,
@@ -98,7 +90,6 @@ export function msUntilNextRun(
     return next.getTime() - now.getTime();
 }
 
-/** Календарный день по UTC в виде ГГГГ-ММ-ДД. По нему называется файл. */
 export function utcDay(date: Date): string {
     return date.toISOString().slice(0, 10);
 }
@@ -113,16 +104,6 @@ function monthNumber(day: string): number {
 
 export type BackupStamp = { id: string; startedAt: Date };
 
-/**
- * Какие бекапы больше не нужны. Все бекапы сегодняшнего дня (по UTC), в том
- * числе ручные, остаются. За последние `keepDailyDays` суток остаётся один
- * бекап на день, последний за день. Дальше остаётся один на месяц, последний
- * за месяц, то есть последнего дня, до `keepMonths` месяцев назад.
- *
- * `items` — все успешные бекапы, включая те, чей файл уже удалён: «последний
- * за день и за месяц» должен считаться по полной истории, иначе после
- * удаления «последнего» его роль перешла бы к предпоследнему.
- */
 export function expiredBackups(
     items: BackupStamp[],
     now: Date,
@@ -162,7 +143,6 @@ export function expiredBackups(
     return expired;
 }
 
-/** tar вернул 1, потому что файл менялся во время чтения: архив при этом годный. */
 export function tarAccepted(code: number | null, stderr: string): boolean {
     if (code === 0) return true;
     if (code !== 1) return false;
@@ -180,7 +160,6 @@ export function tarAccepted(code: number | null, stderr: string): boolean {
     );
 }
 
-/** Строка подключения без имени базы: mongorestore берёт базу из --nsInclude. */
 export function uriWithoutDb(uri: string): string {
     return uri.replace(/^(mongodb(?:\+srv)?:\/\/[^/?]+)\/[^?]*/, '$1/');
 }

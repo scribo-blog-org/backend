@@ -23,7 +23,6 @@ export class LogsController {
         return { status: true, message: 'Logs fetched successfully!', data };
     }
 
-    /** Подсказки для поиска по журналу: пользователи, посты и категории, о которых есть записи. */
     @ApiBearerAuth()
     @RequirePermissions(PERMISSIONS.VIEW_LOGS)
     @Get('entities')

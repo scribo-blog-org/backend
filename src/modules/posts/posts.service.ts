@@ -394,7 +394,6 @@ export class PostsService {
                   }
                 : null,
         ]);
-        // Сохранение без изменений в журнал не пишем: это шум, а не действие.
         if (changes.length) {
             await this.logger.action(
                 'update_post',

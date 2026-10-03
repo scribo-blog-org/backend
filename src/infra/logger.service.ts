@@ -11,11 +11,6 @@ export type LogActor = {
     avatar?: string | null;
 };
 
-/**
- * Снимок автора для записи лога: данные для плашки пользователя. Аккаунт и
- * его аватар потом могут измениться или пропасть, а запись должна выглядеть
- * так же, как в момент действия.
- */
 export const actorFields = (actor: LogActor) => ({
     user: actor.id,
     user_nick: actor.nick_name ?? null,
@@ -49,8 +44,6 @@ export class LoggerService {
             return;
         }
         try {
-            // Запрос, породивший запись, прикладывается сам: id, метод, путь,
-            // адрес и браузер. Поля записи его не затирают.
             const request = currentRequest();
             await this.logs.create({
                 type: input.type,
@@ -65,10 +58,6 @@ export class LoggerService {
         }
     }
 
-    /**
-     * Действие пользователя. Кладёт в запись автора и его ник на тот момент:
-     * аккаунт потом могут удалить, а журнал должен остаться читаемым.
-     */
     action(
         type: string,
         actor: LogActor,
@@ -85,16 +74,10 @@ export class LoggerService {
         });
     }
 
-    /** Событие самой системы: старт сервера и подобное. Автора нет. */
     system(type: string, message: string, data: Record<string, unknown> = {}) {
         return this.log({ type, message, data: { system: true, ...data } });
     }
 
-    /**
-     * Ошибка сервера (5xx). Одинаковая ошибка чаще раза в минуту и больше
-     * ERROR_BUDGET_PER_MINUTE записей в минуту не пишутся: иначе упавшая
-     * зависимость забила бы базу тысячами одинаковых строк.
-     */
     async error(input: {
         status: number;
         method: string;

@@ -6,7 +6,7 @@ import {
 
 describe('mentions.util', () => {
     it('extracts nicks from plain text', () => {
-        expect(extractMentionNicks('Привет @alice и @bob_12')).toEqual([
+        expect(extractMentionNicks('Hello @alice and @bob_12')).toEqual([
             'alice',
             'bob_12',
         ]);

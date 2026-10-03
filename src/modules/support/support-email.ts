@@ -15,7 +15,7 @@ export function supportEmailTemplate({
     intro,
     message,
     url,
-    buttonLabel = 'Открыть обращение',
+    buttonLabel = 'Open request',
 }: {
     title: string;
     intro: string;

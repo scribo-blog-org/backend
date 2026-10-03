@@ -4,11 +4,6 @@ import { mkdir } from 'fs/promises';
 import { diskStorage } from 'multer';
 import { backupsConfig } from './backups.config';
 
-/**
- * Загруженный архив пишется на диск прямо в каталог бекапов под именем
- * .upload-*.partial: большой файл не должен сидеть в памяти, а остатки после
- * падения убирает removeLeftovers при старте.
- */
 export function backupUploadOptions(config: Pick<ConfigService, 'get'>) {
     const cfg = backupsConfig(config);
     return {

@@ -8,7 +8,6 @@ RUN npm run build
 FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
-# mongodump и GNU tar для бекапов из админки (в busybox tar нет гарантий по нескольким -C и кодам возврата).
 RUN apk add --no-cache mongodb-tools tar
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force

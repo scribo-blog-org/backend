@@ -28,7 +28,6 @@ const MONGODUMP_MAGIC = Buffer.from([0x6d, 0xe2, 0x99, 0x81]);
 const goodDump = () =>
     gzipSync(Buffer.concat([MONGODUMP_MAGIC, Buffer.from('rest')]));
 
-/** Заголовок tar вручную: нужен для записей, которые обычный tar не создаст. */
 function rawHeader(name: string, size: number, type: string, link = '') {
     const header = Buffer.alloc(512);
     header.write(name, 0, 100);
@@ -104,13 +103,11 @@ describe('backup upload', () => {
         );
     };
 
-    /** Настоящий архив бекапа, собранный отдельно от самого сервиса. */
     const makeArchive = (
         options: {
             id?: string;
             dbName?: string;
             appVersion?: string;
-            /** null: убрать поле, как в архивах до введения версий. */
             dbVersion?: string | null;
             dump?: Buffer;
             sha?: string;
@@ -177,7 +174,6 @@ describe('backup upload', () => {
         return archive;
     };
 
-    /** Загрузка так, как её делает multer: файл уже лежит во временном месте. */
     const uploadResult = (
         source: string,
         name = 'backup.tar',
@@ -415,7 +411,6 @@ describe('backup upload', () => {
         expect(again.duplicate).toBe(true);
         expect(String(again.record._id)).toBe(String(first.record._id));
         expect(model.docs).toHaveLength(1);
-        // Файл второй загрузки не принят и остался временным: его убирает контроллер.
         expect(
             readdirSync(dir).filter((n) => n.startsWith('scribo-upload-')),
         ).toHaveLength(1);

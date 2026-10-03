@@ -14,8 +14,6 @@ node_modules
 # tests
 coverage
 
-graphify-out/
-
 # local media and backups, only at the repo root
 /uploads
 /backups
