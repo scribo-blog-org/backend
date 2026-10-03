@@ -5,7 +5,6 @@ import { JwtModule } from '@nestjs/jwt';
 import { AppController } from './app.controller';
 import { AuthzModule } from './authz/authz.module';
 import { ApiEnvelopeInterceptor } from './http/api-envelope.interceptor';
-import { LastActivityInterceptor } from './http/last-activity.interceptor';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
@@ -56,9 +55,6 @@ import { publicKeyPem } from './config/jwt-keys';
         BackupsModule,
     ],
     controllers: [AppController],
-    providers: [
-        { provide: APP_INTERCEPTOR, useClass: ApiEnvelopeInterceptor },
-        { provide: APP_INTERCEPTOR, useClass: LastActivityInterceptor },
-    ],
+    providers: [{ provide: APP_INTERCEPTOR, useClass: ApiEnvelopeInterceptor }],
 })
 export class AppModule {}
