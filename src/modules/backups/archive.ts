@@ -26,24 +26,17 @@ import {
 export { ArchiveError } from './tar-scan';
 
 const MANIFEST_MAX_BYTES = 1024 * 1024;
-// Начало потока, который пишет mongodump --archive (0x8199e26d, little endian).
 const MONGODUMP_MAGIC = Buffer.from([0x6d, 0xe2, 0x99, 0x81]);
 
 export type VerifyOptions = {
     tar: string;
     file: string;
     work: string;
-    /** Версия данных этой системы: архив другой версии не принимается. */
     dbVersion: string | null;
-    /** Какой id должен быть в манифесте. Не задан: подойдёт любой (чужой архив). */
     expectedId?: string;
     limits: TarLimits;
 };
 
-/**
- * Что лежит в архиве, должно совпадать с манифестом: ровно манифест, дамп и
- * каталог загрузок, каждый путь один раз, без выхода за пределы.
- */
 function checkLayout(entries: TarEntry[], manifest: Manifest) {
     const seen = new Set<string>();
     const dir = manifest.uploads.dir;
@@ -51,9 +44,6 @@ function checkLayout(entries: TarEntry[], manifest: Manifest) {
     let files = 0;
     let bytes = 0;
     for (const entry of entries) {
-        // bsdtar на macOS кладёт рядом с файлом `._имя` с расширенными
-        // атрибутами. Это не данные бекапа: пропускаем, если лежит там, где
-        // допустимы файлы архива.
         const parent = path.posix.dirname(entry.path);
         if (
             entry.type === 'file' &&
@@ -97,12 +87,6 @@ function checkLayout(entries: TarEntry[], manifest: Manifest) {
     }
 }
 
-/**
- * Проверяет архив и распаковывает его в `work`. Сначала по заголовкам, ничего
- * не распаковывая: только обычные файлы и каталоги, только пути манифеста,
- * размеры и число файлов как в манифесте. Потом распаковка и сверка
- * контрольной суммы дампа. Ничего не заменяет.
- */
 export async function verifyArchive(opts: VerifyOptions): Promise<Manifest> {
     const entries = await scanTar(opts.file, opts.limits);
     const entry = entries.find((item) => item.path === MANIFEST_FILE);
@@ -151,11 +135,6 @@ export async function verifyArchive(opts: VerifyOptions): Promise<Manifest> {
     return manifest;
 }
 
-/**
- * Дамп должен быть целым gzip-потоком в формате mongodump. Контрольная сумма
- * манифеста в чужом архиве ничего не доказывает: её могли посчитать от чего
- * угодно, поэтому смотрим на сам дамп.
- */
 export async function checkMongoDump(file: string): Promise<void> {
     let head = Buffer.alloc(0);
     const sink = new Writable({

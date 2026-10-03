@@ -73,7 +73,6 @@ describe('utcDay', () => {
 
 describe('expiredBackups', () => {
     const cfg = { keepDailyDays: 7, keepMonths: 12 };
-    // Понедельник.
     const now = new Date('2026-10-12T05:00:00Z');
     const at = (id: string, iso: string) => ({
         id,
@@ -100,11 +99,10 @@ describe('expiredBackups', () => {
 
     it('keeps the day that is exactly keepDailyDays old, not older ones', () => {
         const items = [
-            at('seven', '2026-10-05T04:15:00Z'), // 7 суток назад
-            at('eight', '2026-10-04T04:15:00Z'), // воскресенье, но старше недели
+            at('seven', '2026-10-05T04:15:00Z'),
+            at('eight', '2026-10-04T04:15:00Z'),
             at('nine', '2026-10-03T04:15:00Z'),
         ];
-        // Воскресенье ничем не лучше других дней: старше недели остаются только месячные.
         expect(expiredBackups(items, now, cfg)).toEqual(
             new Set(['eight', 'nine']),
         );
@@ -113,10 +111,10 @@ describe('expiredBackups', () => {
     it('keeps the last backup of each month, which is the last day', () => {
         const items = [
             at('sep29', '2026-09-29T04:15:00Z'),
-            at('sep30', '2026-09-30T04:15:00Z'), // последний день месяца
-            at('sep20', '2026-09-20T04:15:00Z'), // воскресенье
+            at('sep30', '2026-09-30T04:15:00Z'),
+            at('sep20', '2026-09-20T04:15:00Z'),
             at('aug30', '2026-08-30T04:15:00Z'),
-            at('aug31', '2026-08-31T04:15:00Z'), // последний день месяца
+            at('aug31', '2026-08-31T04:15:00Z'),
         ];
         expect(expiredBackups(items, now, cfg)).toEqual(
             new Set(['sep29', 'sep20', 'aug30']),
@@ -133,15 +131,14 @@ describe('expiredBackups', () => {
 
     it('drops monthly copies older than keepMonths', () => {
         const items = [
-            at('recent', '2025-11-30T04:15:00Z'), // 11 месяцев назад
-            at('edge', '2025-10-31T04:15:00Z'), // ровно 12
-            at('old', '2025-09-30T04:15:00Z'), // 13
+            at('recent', '2025-11-30T04:15:00Z'),
+            at('edge', '2025-10-31T04:15:00Z'),
+            at('old', '2025-09-30T04:15:00Z'),
         ];
         expect(expiredBackups(items, now, cfg)).toEqual(new Set(['old']));
     });
 
     it('decides by the whole history, so a removed last backup is not replaced by the one before it', () => {
-        // Файл 'late' уже удалён, но запись в истории есть: 'early' по-прежнему не последний.
         const items = [
             at('early', '2026-10-09T04:15:00Z'),
             at('late', '2026-10-09T20:00:00Z'),

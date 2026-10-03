@@ -286,7 +286,7 @@ export class ChatService {
         void this.mail
             .sendEmail({
                 to: recipient.email,
-                subject: 'С вами начали переписку в Scribo',
+                subject: 'Someone started a conversation with you on Scribo',
                 html: chatStartedEmailTemplate({
                     recipientNickName: recipient.nick_name,
                     initiatorNickName,
@@ -351,7 +351,6 @@ export class ChatService {
         }
 
         if (isNew) {
-            // Содержимое переписки в журнал не попадает: только факт, что чат начат.
             await this.logger.action('create_conversation', actor, {
                 target_user: otherUserId,
                 target_nick: other.nick_name,
@@ -569,9 +568,6 @@ export class ChatService {
             .lean<MessageLean>();
         if (!message) {
             throw new NotFoundException('Message not found');
-        }
-        if (String(message.sender_id) !== actor.id) {
-            throw new ForbiddenException("You can't delete this message");
         }
         const conversation = await this.getConversationForActor(
             String(message.conversation_id),

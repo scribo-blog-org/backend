@@ -36,8 +36,6 @@ export class LogsQueryService {
         }
         const { page, limit, skip } = parsePagination(query, 9, 50);
         const filter: Record<string, unknown> = {};
-        // «Действия пользователя»: что он сделал сам и что делали с ним
-        // (подписались, сменили роль, начали с ним чат).
         if (query.user) {
             filter.$or = [
                 'data.user',
@@ -71,10 +69,6 @@ export class LogsQueryService {
         };
     }
 
-    /**
-     * Сущности, о которых есть записи в журнале, по части имени. Без `search`
-     * отдаёт самые свежие. Страницами, чтобы список в поиске подгружался.
-     */
     async entities(
         query: { search?: string; page?: number; limit?: number },
         actor: Actor,

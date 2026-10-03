@@ -5,11 +5,6 @@ import { LoggerService } from '../../infra/logger.service';
 import { syncDbMeta } from './db-version';
 import { appVersion } from './manifest';
 
-/**
- * При каждом запуске приводит запись о версии в базе к версии backend. Работает
- * независимо от того, включены ли бекапы: версия нужна и для того, чтобы
- * архивы, снятые потом, были подписаны правильно.
- */
 @Injectable()
 export class DbVersionService implements OnModuleInit {
     constructor(
@@ -40,7 +35,6 @@ export class DbVersionService implements OnModuleInit {
                 },
             );
         } catch (error) {
-            // Запись о версии не повод не стартовать: бекапы просто подпишутся по коду.
             console.error('database version was not synced', error);
         }
     }

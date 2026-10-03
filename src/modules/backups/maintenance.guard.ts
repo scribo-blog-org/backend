@@ -9,11 +9,6 @@ import { BackupsService } from './backups.service';
 
 const READ_ONLY = new Set(['GET', 'HEAD', 'OPTIONS']);
 
-/**
- * Пока идёт откат, запись запрещена: иначе новые данные попали бы в базу,
- * которую сейчас подменяют, и потерялись бы. Чтение работает. Эндпоинты
- * бекапов остаются доступны, иначе админка не покажет ход отката.
- */
 @Injectable()
 export class MaintenanceGuard implements CanActivate {
     constructor(private readonly backups: BackupsService) {}

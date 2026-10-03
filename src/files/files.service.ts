@@ -9,10 +9,6 @@ import { ALLOWED_IMAGE_MIME_TYPES, UPLOAD_LIMIT_SIZE } from './upload';
 export type ImageKind = 'avatar' | 'featured_image';
 export type ImageField = 'userAvatar' | 'featuredImage';
 
-/**
- * Слой файлов для сервисов приложения, как репозиторий для базы: сервисы
- * зовут saveImage и remove и не знают, где и как лежат файлы.
- */
 @Injectable()
 export class FilesService {
     private readonly publicUrl: string;
@@ -29,7 +25,6 @@ export class FilesService {
         return { dir: this.disk.root, publicUrl: this.publicUrl };
     }
 
-    /** Сохраняет картинку и возвращает её публичную ссылку. */
     async saveImage(
         file: Express.Multer.File | undefined,
         kind: ImageKind,
@@ -64,10 +59,6 @@ export class FilesService {
         return `${UPLOADS_URL_PATH}/${key}`;
     }
 
-    /**
-     * Удаляет файл по пути из базы (`/uploads/...`) или по старой абсолютной
-     * ссылке на тот же путь. Чужие адреса, включая S3, игнорируются.
-     */
     async remove(url?: string | null): Promise<boolean> {
         const key = uploadKey(url);
         if (!key) return false;
@@ -80,7 +71,6 @@ export class FilesService {
     }
 }
 
-/** Ключ на диске из пути `/uploads/...`. Домен в ссылке не важен. */
 function uploadKey(url?: string | null): string | null {
     if (!url) return null;
     let pathname: string;

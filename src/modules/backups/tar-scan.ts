@@ -1,20 +1,12 @@
 import { open } from 'fs/promises';
 
-/**
- * Разбор заголовков tar без распаковки. Нужен, чтобы посмотреть, что лежит в
- * чужом архиве, до того как что-то попадёт на диск: пути, типы записей и
- * размеры. Содержимое файлов не читается, только заголовки.
- */
-
 const BLOCK = 512;
 const META_LIMIT = 1024 * 1024;
 
 export type TarEntry = {
-    /** Путь без хвостового слэша и без ведущего `./`. */
     path: string;
     type: 'file' | 'dir';
     size: number;
-    /** Где в файле начинаются данные записи. */
     dataOffset: number;
 };
 
@@ -26,7 +18,6 @@ export type TarLimits = {
 };
 
 function octal(field: Buffer): number {
-    // Большие значения GNU tar пишет двоичным числом: старший бит байта 0x80.
     if (field[0] & 0x80) {
         let value = field[0] & 0x7f;
         for (let i = 1; i < field.length; i++) value = value * 256 + field[i];
@@ -50,7 +41,6 @@ function validChecksum(header: Buffer): boolean {
     return sum === octal(header.subarray(148, 156));
 }
 
-/** Записи pax-заголовка вида `<длина> ключ=значение\n`. */
 function paxRecords(data: Buffer): Record<string, string> {
     const result: Record<string, string> = {};
     let pos = 0;
@@ -69,7 +59,6 @@ function paxRecords(data: Buffer): Record<string, string> {
     return result;
 }
 
-/** Приводит путь из архива к виду без `./` и хвостового слэша. Небезопасный отвергает. */
 export function cleanEntryPath(raw: string): string {
     const name = raw.replace(/^(\.\/)+/, '').replace(/\/+$/, '');
     if (
@@ -84,11 +73,6 @@ export function cleanEntryPath(raw: string): string {
     return name;
 }
 
-/**
- * Читает все записи архива. Принимает только обычные файлы и каталоги: ссылки,
- * устройства и всё остальное означают, что архив не наш, и распаковывать его
- * нельзя.
- */
 export async function scanTar(
     file: string,
     limits: TarLimits,
@@ -135,10 +119,7 @@ export async function scanTar(
                 } else if (flag === 'L') {
                     nextPath = text(data);
                 }
-            } else if (flag === 'K') {
-                // Длинное имя ссылки: сама запись после него всё равно будет
-                // отвергнута как ссылка.
-            } else {
+            } else if (flag !== 'K') {
                 const usesPrefix =
                     header.toString('latin1', 257, 262) === 'ustar' &&
                     header[262] === 0;
@@ -170,7 +151,6 @@ export async function scanTar(
                         'The archive is too large when unpacked',
                     );
                 }
-                // Корень архива, который пишет `tar -c .`: сам по себе не данные.
                 if (type === 'dir' && /^(\.\/?)+$/.test(raw)) {
                     offset = dataOffset;
                     continue;
@@ -192,7 +172,6 @@ export async function scanTar(
     }
 }
 
-/** Читает содержимое одной небольшой записи. */
 export async function readEntry(
     file: string,
     entry: TarEntry,

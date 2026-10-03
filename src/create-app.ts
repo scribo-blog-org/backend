@@ -55,7 +55,6 @@ export async function configureScriboApp(
     });
     app.use(cookieParser());
     app.use(requestContextMiddleware);
-    // В проде каталог отдаёт nginx мимо Node. Здесь это только для разработки.
     if (backendServesUploads(process.env)) {
         (app as NestExpressApplication).useStaticAssets(
             uploadsDir({ get: (key: string) => process.env[key] }),
@@ -63,7 +62,6 @@ export async function configureScriboApp(
                 prefix: UPLOADS_URL_PATH,
                 index: false,
                 dotfiles: 'deny',
-                // Аватар перезаписывается под тем же именем: перепроверка по ETag.
                 setHeaders: (res) => {
                     res.setHeader('Cache-Control', 'public, no-cache');
                     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -95,8 +93,6 @@ export async function configureScriboApp(
         credentials: true,
         methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
         allowedHeaders: ['Content-Type', 'Authorization'],
-        // Content-Disposition нужен, чтобы фронтенд при другом origin видел имя
-        // скачиваемого бекапа, иначе файл сохраняется как backup.gz.
         exposedHeaders: ['Set-Cookie', 'Content-Disposition'],
         optionsSuccessStatus: 200,
     });

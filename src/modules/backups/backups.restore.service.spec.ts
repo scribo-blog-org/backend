@@ -92,8 +92,6 @@ describe('backup restore', () => {
         mkdirSync(bin);
         writeFileSync(path.join(uploads, 'src/avatar/a.png'), 'AAA');
         script('mongodump', 'printf "dump-bytes"');
-        // Каждый вызов дописывает свои аргументы в файл. Если рядом лежит
-        // fail-on-N, вызов с этим номером падает.
         script(
             'mongorestore',
             `echo "$@" >> "${calls}"; n=$(wc -l < "${calls}" | tr -d ' ');
@@ -137,7 +135,6 @@ if [ -f "${root}/fail-on-$n" ]; then echo "boom mongodb+srv://u:secret@h/db" >&2
 
     it('restores the uploads, passes the right flags and records the current backup', async () => {
         const record = await makeBackup();
-        // Состояние после бекапа: файл удалён, появился чужой, в базе новая коллекция.
         rmSync(path.join(uploads, 'src/avatar/a.png'));
         writeFileSync(path.join(uploads, 'src/avatar/b.png'), 'BBB');
         connection.names.push('created_later');
@@ -157,7 +154,6 @@ if [ -f "${root}/fail-on-$n" ]; then echo "boom mongodb+srv://u:secret@h/db" >&2
         expect(args).toContain('--nsExclude=scribo.backups');
         expect(args).toContain('mongo.archive.gz');
         expect(args).not.toContain("p'w");
-        // Коллекция, созданная после бекапа, убрана; история бекапов осталась.
         expect(connection.names.sort()).toEqual(['backups', 'posts', 'users']);
 
         const state = await readState(dir);
@@ -172,7 +168,6 @@ if [ -f "${root}/fail-on-$n" ]; then echo "boom mongodb+srv://u:secret@h/db" >&2
         expect(existsSync(path.join(dir, 'restore.lock'))).toBe(false);
         expect(readdirSync(dir).filter((n) => n.startsWith('.'))).toEqual([]);
 
-        // Страховочный снимок создан и отличается от обычного бекапа.
         const snapshot = model.docs.find((d) => d.kind === 'pre_restore')!;
         expect(snapshot.status).toBe('success');
         expect(snapshot.file_name).toMatch(/^scribo-pre-restore-/);
@@ -191,7 +186,6 @@ if [ -f "${root}/fail-on-$n" ]; then echo "boom mongodb+srv://u:secret@h/db" >&2
     it('refuses a damaged archive before touching anything', async () => {
         const record = await makeBackup();
         const archive = path.join(dir, record.file_name);
-        // Подменяем дамп внутри архива на тот же размер, но другие байты.
         const tmp = path.join(root, 'tamper');
         mkdirSync(tmp);
         execFileSync('tar', ['-xf', archive, '-C', tmp]);
@@ -226,7 +220,6 @@ if [ -f "${root}/fail-on-$n" ]; then echo "boom mongodb+srv://u:secret@h/db" >&2
         expect(job.rolled_back).toBe(true);
         expect(job.error).toContain('boom mongodb+srv://***@');
         expect(job.error).not.toContain('secret');
-        // Второй вызов mongorestore это возврат к снимку, файлы как до отката.
         expect(callCount()).toBe(2);
         expect(files(uploads)).toEqual(['src/avatar/b.png']);
         const state = await readState(dir);
@@ -261,7 +254,6 @@ if [ -f "${root}/fail-on-$n" ]; then echo "boom mongodb+srv://u:secret@h/db" >&2
         expect(
             readdirSync(dir).filter((n) => n.startsWith('scribo-pre-restore-')),
         ).toEqual([]);
-        // Запись о снимке остаётся в истории, откат помнит, что он был.
         expect((await readState(dir)).last_restore!.safety_backup_id).toBe(
             snapshot._id,
         );
@@ -289,7 +281,6 @@ if [ -f "${root}/fail-on-$n" ]; then echo "boom mongodb+srv://u:secret@h/db" >&2
 
     it('never keeps more than one safety snapshot', async () => {
         const record = await makeBackup();
-        // Первый откат падает на шаге 1, возврат на шаге 2. Второй так же на 3 и 4.
         writeFileSync(path.join(root, 'fail-on-1'), '');
         await restore.start(record._id, null);
         await idle();
@@ -365,7 +356,6 @@ if [ -f "${root}/fail-on-$n" ]; then echo "boom mongodb+srv://u:secret@h/db" >&2
             'already running',
         );
         await idle();
-        // Новый бекап за тот же день заменил прежнюю запись: берём свежую.
         const latest = model.docs.filter((d) => d.kind === 'daily').at(-1)!;
         await restore.start(latest._id, null);
         await expect(backups.start('manual')).rejects.toThrow(

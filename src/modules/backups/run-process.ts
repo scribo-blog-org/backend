@@ -7,14 +7,11 @@ const STDERR_TAIL = 1500;
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 
 export type RunOptions = {
-    /** Файл, куда складывается stdout. Без него stdout отбрасывается. */
     out?: string;
-    /** Какие коды выхода считать успехом. По умолчанию только 0. */
     accepted?: (code: number | null, stderr: string) => boolean;
     timeoutMs?: number;
 };
 
-/** Запускает программу и ждёт завершения. Бросает ошибку с хвостом stderr. */
 export async function runProcess(
     command: string,
     args: string[],

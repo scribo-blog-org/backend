@@ -55,12 +55,10 @@ import {
 } from './manifest';
 import { runProcess } from './run-process';
 
-// setTimeout не принимает задержку больше 2^31 мс; сутки с запасом влезают.
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
 type Busy = 'backup' | 'restore' | null;
 
-/** Чем запущен сам бекап: загрузка архива бекапом не является. */
 type RunTrigger = Exclude<BackupTrigger, 'upload'>;
 
 const fileStamp = () =>
@@ -70,14 +68,6 @@ const fileStamp = () =>
         .replace(/\..*/, '')
         .replace('T', '-');
 
-/**
- * Бекап в один файл: дамп Mongo, каталог загрузок и manifest.json, который
- * их связывает. Запускается по расписанию и по кнопке из админки. Каждый
- * запуск это новый файл со временем в имени. Правила хранения (за сегодня все,
- * за прошлые дни один, дальше по одному на месяц) применяет
- * prune после каждого бекапа. Страховочный снимок перед откатом живёт
- * отдельно: хранятся последние несколько.
- */
 @Injectable()
 export class BackupsService implements OnModuleInit, OnModuleDestroy {
     private readonly cfg: BackupsConfig;
@@ -104,7 +94,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
     }
 
     async onModuleInit() {
-        // Процесс мог упасть посреди дампа: такая запись навсегда осталась бы running.
         await this.backups.updateMany(
             { status: 'running' },
             {
@@ -123,7 +112,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         if (this.timer) clearTimeout(this.timer);
     }
 
-    /** Один процесс занят одним делом: бекапом или откатом. */
     acquire(kind: 'backup' | 'restore'): boolean {
         if (this.busy) return false;
         this.busy = kind;
@@ -160,7 +148,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         };
     }
 
-    /** Версия данных, с которой работает эта система. */
     currentDbVersion(): string | null {
         return dbVersionOf(appVersion());
     }
@@ -183,8 +170,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
                     item.status === 'success' &&
                     Boolean(item.file_name) &&
                     !item.file_removed_at;
-                // У записей до введения версий версии в записи нет: тогда решает
-                // проверка архива при откате.
                 const blocked =
                     item.contents?.db_version !== undefined
                         ? incompatibility(
@@ -229,10 +214,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         return record.toObject();
     }
 
-    /**
-     * Страховочный снимок перед откатом. Зовётся из отката, который уже держит
-     * блокировку, поэтому сам её не берёт. Бросает, если снять не удалось.
-     */
     async snapshot(userId?: string) {
         const record = await this.createRecord('pre_restore', 'manual', userId);
         const error = await this.produce(
@@ -285,7 +266,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         };
     }
 
-    /** Запись списка, у которой уже есть живой файл этого бекапа (по id манифеста). */
     async listedArchive(manifestId: string) {
         const own = await this.findRecord(manifestId);
         if (own && own.status === 'success' && !own.file_removed_at) {
@@ -297,10 +277,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         return copy ?? null;
     }
 
-    /**
-     * Принимает проверенный архив, загруженный вручную: кладёт файл к остальным
-     * и заводит запись в истории. Файл уже проверен вызывающим.
-     */
     async adopt(
         tempPath: string,
         manifest: Manifest,
@@ -379,11 +355,8 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
             this.start('schedule').catch((error) =>
                 console.error('scheduled backup was not started', error),
             );
-            // Отсчёт от «через минуту»: таймер может сработать на миллисекунды
-            // раньше срока и тогда запустил бы тот же слот второй раз.
             this.scheduleNext(new Date(Date.now() + 60_000));
         }, delay);
-        // Таймер не должен удерживать процесс при остановке.
         this.timer.unref();
     }
 
@@ -396,7 +369,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         try {
             const error = await this.produce(id, day, 'daily', trigger);
             if (error) {
-                // Тихо упавший бекап хуже всего: в журнале его должно быть видно.
                 await this.logEvent(
                     'backup_failed',
                     `Backup failed (${trigger}): ${error}`,
@@ -433,10 +405,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    /**
-     * Запись журнала о бекапе. Если его запустил человек, в записи его снимок
-     * для плашки пользователя, иначе это событие системы (расписание).
-     */
     private logEvent(
         type: string,
         message: string,
@@ -453,10 +421,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         });
     }
 
-    /**
-     * Собирает архив и обновляет запись. Возвращает текст ошибки или null.
-     * Исключения наружу не выпускает: итог всегда оказывается в записи.
-     */
     private async produce(
         id: Types.ObjectId,
         day: string,
@@ -464,8 +428,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         trigger: Manifest['trigger'],
     ): Promise<string | null> {
         const stamp = fileStamp();
-        // Каждый бекап отдельный файл: ручной не заменяет ни вчерашний,
-        // ни сегодняшний, а добавляется. Лишнее убирает prune.
         const fileName =
             kind === 'daily'
                 ? `scribo-${stamp}.tar`
@@ -476,8 +438,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         const conf = this.resolve(`.uri.${randomBytes(6).toString('hex')}`);
         try {
             await mkdir(work, { recursive: true, mode: 0o700 });
-            // URI с паролем идёт через файл 0600, а не аргументом: в списке
-            // процессов и в логах его нет.
             await writeFile(
                 conf,
                 `uri: '${this.uri().replace(/'/g, "''")}'\n`,
@@ -547,8 +507,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
             );
             const { size } = await stat(partial);
             if (size === 0) throw new Error('The archive is empty');
-            // rename заменяет файл за этот день целиком и сразу: пока архив
-            // не готов, прежний бекап дня остаётся на месте.
             await rename(partial, target);
             await chmod(target, 0o600);
             const now = new Date();
@@ -604,7 +562,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
             .sort();
     }
 
-    /** Возвращает, сколько файлов удалено. */
     async prune(): Promise<number> {
         const now = new Date();
         const daily = await this.backups
@@ -639,8 +596,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
             removed += 1;
         }
 
-        // Страховочные снимки и загруженные архивы: последние несколько,
-        // остальные удаляем. Это не ежедневные бекапы, правило дней к ним не относится.
         const limits: [Backup['kind'], number][] = [
             ['pre_restore', this.cfg.keepPreRestore],
             ['uploaded', this.cfg.keepUploaded],
@@ -666,10 +621,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         return removed;
     }
 
-    /**
-     * Убирает страховочный снимок, который больше не нужен: откат прошёл,
-     * и вернуться не к чему. Запись в истории остаётся.
-     */
     async discardSnapshot(id: string) {
         const record = await this.findRecord(id);
         if (
@@ -688,7 +639,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         );
     }
 
-    /** Остатки от процесса, который упал посреди бекапа или отката. */
     private async removeLeftovers() {
         for (const name of await readdir(this.cfg.dir)) {
             if (

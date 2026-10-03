@@ -1,11 +1,6 @@
 import { readFile, rename, rm, writeFile } from 'fs/promises';
 import path from 'path';
 
-/**
- * Состояние бекапов вне базы. Живёт файлом рядом с архивами, потому что база
- * при откате заменяется целиком, а ответ на вопрос «на каком я бекапе» должен
- * её переживать.
- */
 export type CurrentBackup = {
     backup_id: string;
     file_name: string;
