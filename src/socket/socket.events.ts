@@ -41,6 +41,17 @@ export class SocketEvents {
         });
     }
 
+    async chatMessagesDeleted(
+        conversationId: string,
+        ids: string[],
+    ): Promise<void> {
+        await this.broadcast(
+            this.chatRoom(conversationId),
+            'chat:messages-deleted',
+            { ids },
+        );
+    }
+
     async chatRead(conversationId: string, payload: unknown): Promise<void> {
         await this.broadcast(
             this.chatRoom(conversationId),

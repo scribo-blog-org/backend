@@ -24,15 +24,15 @@ import { UsersService } from '../users/users.service';
 import { CreateNotification } from '../notifications/notifications.type';
 
 const KIND_LABELS: Record<string, string> = {
-    complaint: 'Жалоба',
-    request: 'Запрос',
-    help: 'Помощь',
+    complaint: 'Complaint',
+    request: 'Request',
+    help: 'Help',
 };
 
 const STATUS_LABELS: Record<string, string> = {
-    new: 'Новый',
-    in_review: 'На рассмотрении',
-    reviewed: 'Рассмотрено',
+    new: 'New',
+    in_review: 'In review',
+    reviewed: 'Reviewed',
 };
 
 const SORT_FIELDS: Record<string, string> = {
@@ -333,8 +333,8 @@ export class SupportService {
         if (!authenticated) {
             void this.sendSupportMail({
                 to: email,
-                title: 'Мы приняли ваш запрос',
-                intro: `Спасибо. Мы получили ваше обращение (${kindLabel}). Ответы команды можно посмотреть на странице запроса.`,
+                title: 'We received your request',
+                intro: `Thanks. We received your request (${kindLabel}). You can read the team's replies on the request page.`,
                 message: supportMessage,
                 url: this.requestPageUrl(access_key),
             });
@@ -473,8 +473,8 @@ export class SupportService {
                 support_request: existing.access_key,
             },
             {
-                title: 'Новый ответ по вашему запросу',
-                intro: 'Команда Scribo ответила на ваше обращение. Посмотреть ответ можно на странице запроса.',
+                title: 'A new reply to your request',
+                intro: 'The Scribo team replied to your request. You can read the reply on the request page.',
                 message,
             },
         );
@@ -531,8 +531,8 @@ export class SupportService {
                     support_request: existing.access_key,
                 },
                 {
-                    title: 'Новый ответ по вашему запросу',
-                    intro: 'Команда Scribo ответила на ваше обращение. Посмотреть ответ можно на странице запроса.',
+                    title: 'A new reply to your request',
+                    intro: 'The Scribo team replied to your request. You can read the reply on the request page.',
                     message,
                 },
             );
@@ -599,8 +599,8 @@ export class SupportService {
                 support_status: nextStatus,
             },
             {
-                title: 'Статус вашего запроса изменён',
-                intro: `Статус обращения обновлён: ${statusLabel}. Открыть обращение можно на странице запроса.`,
+                title: 'Your request status has changed',
+                intro: `Request status updated: ${statusLabel}. You can open the request on its page.`,
             },
         );
         await this.logger.log({

@@ -1,9 +1,9 @@
 export function parseDevice(userAgent = '') {
     if (!userAgent) {
-        return 'Неизвестное устройство';
+        return 'Unknown device';
     }
 
-    let browser = 'Браузер';
+    let browser = 'Browser';
     if (userAgent.includes('Edg/') || userAgent.includes('EdgiOS'))
         browser = 'Edge';
     else if (userAgent.includes('CriOS/') || userAgent.includes('Chrome/'))
@@ -26,10 +26,10 @@ export function parseDevice(userAgent = '') {
 export function parseDeviceKind(userAgent = '') {
     const ua = String(userAgent || '');
     if (/iPad|Tablet|(Android(?!.*Mobile))/i.test(ua)) {
-        return 'Планшет';
+        return 'Tablet';
     }
     if (/Mobi|iPhone|iPod|Android|webOS|BlackBerry|Opera Mini/i.test(ua)) {
-        return 'Телефон';
+        return 'Phone';
     }
-    return 'Компьютер';
+    return 'Computer';
 }

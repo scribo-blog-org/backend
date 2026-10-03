@@ -43,7 +43,6 @@ export class BackupsController {
         @InjectModel(User.name) private readonly users: Model<User>,
     ) {}
 
-    /** Данные для плашки автора: аватара нет в токене, берём из аккаунта. */
     private async author(actor: Actor): Promise<LogActor> {
         const user = await this.users
             .findById(actor.id)
@@ -94,10 +93,6 @@ export class BackupsController {
         return { status: true, message: 'Restore started', data };
     }
 
-    /**
-     * Загрузка своего архива. Файл проверяется целиком и попадает в список,
-     * ставится потом обычной кнопкой «Восстановить» со всеми подтверждениями.
-     */
     @Post('upload')
     @RequirePermissions(PERMISSIONS.MANAGE_BACKUPS, PERMISSIONS.RESTORE_BACKUPS)
     @UseInterceptors(FileInterceptor('file'))
@@ -148,7 +143,6 @@ export class BackupsController {
             });
             throw error;
         } finally {
-            // После успеха файл уже переименован, force убирает только остаток.
             await rm(file.path, { force: true });
         }
     }

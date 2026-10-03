@@ -45,16 +45,6 @@ export type RestoreJob = {
     rolled_back: boolean;
 };
 
-/**
- * Откат: ставит на место базу и загрузки из выбранного архива.
- *
- * Порядок защищает от потерь: сначала архив распаковывается и проверяется
- * (контрольная сумма дампа, число файлов), потом снимается страховочный
- * снимок текущего состояния, и только после этого что-то заменяется. Если
- * замена не удалась, система возвращается к снимку. История бекапов
- * (коллекция backups) при замене базы не трогается, а ответ на вопрос «на
- * каком я бекапе» хранится файлом state.json, вне базы.
- */
 @Injectable()
 export class BackupRestoreService implements OnModuleInit {
     private job: RestoreJob | null = null;
@@ -70,8 +60,6 @@ export class BackupRestoreService implements OnModuleInit {
     }
 
     async onModuleInit() {
-        // Замок остаётся только если процесс умер посреди отката. Тогда база и
-        // файлы могут быть восстановлены наполовину: честно это показываем.
         const lock = await readLock(this.dir);
         if (!lock) return;
         await recordRestore(this.dir, {
@@ -173,8 +161,6 @@ export class BackupRestoreService implements OnModuleInit {
             safetyId = String(safety._id);
             const fresh = await this.archives.findRecord(safetyId);
             safetyFile = fresh?.file_name ?? null;
-            // Снимок должен быть один: старые от прошлых неудачных откатов
-            // уже не нужны, пока есть свежий.
             await this.archives
                 .prune()
                 .catch((e) => console.error('backup prune failed', e));
@@ -248,14 +234,10 @@ export class BackupRestoreService implements OnModuleInit {
             ).catch((e) => console.error('restore state not saved', e));
             await removeLock(this.dir);
             if (!error) {
-                // База принесла запись о версии из архива, а работает с ней
-                // эта версия backend.
                 await syncDbMeta(this.connection, appVersion()).catch((e) =>
                     console.error('database version was not synced', e),
                 );
             }
-            // Откат удался, возвращаться некуда: снимок только занимает место.
-            // После неудачного отката он остаётся: по нему восстанавливают вручную.
             let safetyRemoved = false;
             if (!error && safetyId) {
                 safetyRemoved = await this.archives
@@ -291,7 +273,6 @@ export class BackupRestoreService implements OnModuleInit {
         }
     }
 
-    /** Распаковывает архив и сверяет его с манифестом. Ничего не заменяет. */
     private extractAndVerify(
         file: string,
         work: string,
@@ -316,16 +297,12 @@ export class BackupRestoreService implements OnModuleInit {
 
     private async restoreDatabase(work: string, manifest: Manifest) {
         const cfg = this.archives.settings;
-        // Архив можно снять в одной базе и поставить в другую (стейдж в
-        // локальную, прод в стейдж): ставим всегда в ту, к которой подключён
-        // backend, с переименованием, если имена разные.
         const db = manifest.db.name;
         const target = this.connection.name;
         const conf = this.archives.pathOf(
             `.uri.${randomBytes(6).toString('hex')}`,
         );
         try {
-            // URI с паролем только через файл 0600, как и при бекапе.
             await writeFile(
                 conf,
                 `uri: '${uriWithoutDb(this.archives.connectionUri()).replace(/'/g, "''")}'\n`,
@@ -337,8 +314,6 @@ export class BackupRestoreService implements OnModuleInit {
                 `--archive=${path.join(work, MONGO_ARCHIVE)}`,
                 '--drop',
                 `--nsInclude=${db}.*`,
-                // История бекапов остаётся как есть: иначе откат её стёр бы.
-                // Фильтры работают по исходным именам, переименование после них.
                 `--nsExclude=${db}.backups`,
                 ...(db === target
                     ? []
@@ -350,8 +325,6 @@ export class BackupRestoreService implements OnModuleInit {
             await rm(conf, { force: true });
         }
 
-        // --drop убирает только то, что есть в архиве. Коллекции, созданные
-        // позже бекапа, остались бы с новыми данными: убираем и их.
         const handle = this.connection.db;
         if (!handle) return;
         const known = new Set(manifest.db.collections);
@@ -372,7 +345,6 @@ export class BackupRestoreService implements OnModuleInit {
     private async replaceUploads(work: string, manifest: Manifest) {
         const dest = this.archives.settings.uploadsDir;
         await mkdir(dest, { recursive: true });
-        // Сам каталог это точка монтирования, его не удаляем: чистим содержимое.
         for (const name of await readdir(dest)) {
             await rm(path.join(dest, name), { recursive: true, force: true });
         }

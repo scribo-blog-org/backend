@@ -15,7 +15,6 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { tryConsume } from '../../http/rate-limit.guard';
 import { Session } from '../../database/schemas/session.schema';
 import { User } from '../../database/schemas/user.schema';
-import type { CreateNotification } from '../notifications/notifications.type';
 
 type UserLean = {
     _id: Types.ObjectId;

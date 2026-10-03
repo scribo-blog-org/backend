@@ -73,8 +73,6 @@ export class ApiExceptionFilter implements ExceptionFilter {
         if (!isHttp) {
             console.error(exception);
         }
-        // В журнал идут ошибки сервера. 503 это режим обслуживания на время
-        // отката бекапа, он задуман и ошибкой не считается.
         if (status >= 500 && status !== HttpStatus.SERVICE_UNAVAILABLE) {
             const auth = (request as { auth?: { id?: string } }).auth;
             void this.logger?.error({

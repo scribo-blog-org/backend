@@ -32,7 +32,7 @@ export function getRefreshCookies(cookieHeader?: string) {
         try {
             value = decodeURIComponent(value);
         } catch {
-            // keep raw
+            void 0;
         }
         if (value) tokens.push(value);
     }

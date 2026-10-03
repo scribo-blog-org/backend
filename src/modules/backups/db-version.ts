@@ -4,19 +4,11 @@ export const META_COLLECTION = 'app_meta';
 const META_ID = 'db';
 
 export type DbMeta = {
-    /** Версия данных: мажор и минор версии backend, например `6.1`. */
     version: string | null;
-    /** Полная версия backend, которая последней открывала эту базу. */
     app_version: string;
     synced_at: Date;
 };
 
-/**
- * Версия данных по версии backend: `6.1.2` даёт `6.1`. Исправления (третья
- * цифра) формат данных не меняют, а новая функция поднимает минор, и бекапы
- * старого минора перестают подходить. Поднимать версию отдельно руками не
- * нужно: она следует за `version` в package.json.
- */
 export function dbVersionOf(
     appVersion: string | null | undefined,
 ): string | null {
@@ -24,7 +16,6 @@ export function dbVersionOf(
     return match ? `${Number(match[1])}.${Number(match[2])}` : null;
 }
 
-/** Почему архив нельзя ставить в эту систему, или null, если версии совпадают. */
 export function incompatibility(
     archive: string | null | undefined,
     current: string | null,
@@ -53,11 +44,6 @@ export async function readDbMeta(
         : null;
 }
 
-/**
- * Записывает в саму базу, какой версией backend она сейчас обслуживается.
- * Зовётся при каждом запуске и после отката: восстановленная база приносит
- * свою запись, а работать с ней уже эта версия.
- */
 export async function syncDbMeta(
     connection: Pick<Connection, 'db'>,
     appVersion: string,

@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { createReadStream } from 'fs';
+import { createReadStream, readFileSync } from 'fs';
 import { readdir, stat } from 'fs/promises';
 import path from 'path';
 import { dbVersionOf } from './db-version';
@@ -10,20 +10,14 @@ export const MONGO_ARCHIVE = 'mongo.archive.gz';
 
 export type BackupKind = 'daily' | 'pre_restore';
 
-/**
- * Паспорт архива. Лежит внутри самого .tar и связывает дамп базы и каталог
- * загрузок: по нему проверяется, что архив целый, и из него видно, чем он был.
- */
 export type Manifest = {
     format: number;
-    /** Совпадает с _id записи в истории бекапов. */
     id: string;
     created_at: string;
     day: string;
     kind: BackupKind;
     trigger: 'schedule' | 'manual' | 'restore';
     app_version: string;
-    /** На каком бекапе стояла система, когда сняли этот архив. */
     based_on: string | null;
     db: {
         name: string;
@@ -31,7 +25,6 @@ export type Manifest = {
         sha256: string;
         bytes: number;
         collections: string[];
-        /** Версия данных (см. db-version.ts). Нет в архивах, снятых до версий. */
         version?: string | null;
     };
     uploads: { dir: string; files: number; bytes: number };
@@ -71,7 +64,6 @@ export function parseManifest(raw: string): Manifest {
     return m as Manifest;
 }
 
-/** Версия данных архива. У старых архивов без неё берём из версии backend, которой он снят. */
 export function manifestDbVersion(manifest: Manifest): string | null {
     return manifest.db.version ?? dbVersionOf(manifest.app_version);
 }
@@ -86,7 +78,6 @@ export function sha256File(file: string): Promise<string> {
     });
 }
 
-/** Сколько обычных файлов и байт в каталоге, включая вложенные. */
 export async function dirStats(
     dir: string,
 ): Promise<{ files: number; bytes: number }> {
@@ -114,10 +105,9 @@ export async function dirStats(
 
 export function appVersion(): string {
     try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const pkg = require(path.join(process.cwd(), 'package.json')) as {
-            version?: string;
-        };
+        const pkg = JSON.parse(
+            readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'),
+        ) as { version?: string };
         return pkg.version ?? 'unknown';
     } catch {
         return 'unknown';

@@ -46,7 +46,6 @@ class Query {
     }
 }
 
-/** Минимальная замена mongoose-модели в памяти: ровно то, что трогает код бекапов. */
 export function fakeModel() {
     const docs: Doc[] = [];
     return {

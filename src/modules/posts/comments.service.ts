@@ -439,7 +439,6 @@ export class CommentsService {
         return unliked;
     }
 
-    /** Заголовок поста для записи журнала: пост могут удалить, а запись останется. */
     private async postTitle(postId: unknown): Promise<string | null> {
         const post = await this.posts
             .findById(postId)

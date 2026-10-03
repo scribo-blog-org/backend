@@ -9,7 +9,7 @@ import { setPasswordHash } from './password';
 const MAX_CODE_ATTEMPTS = 5;
 
 function invalidCodeError() {
-    return fieldError('emailCode', 'Неверный код');
+    return fieldError('emailCode', 'Invalid code');
 }
 
 @Injectable()
@@ -41,8 +41,8 @@ export class PasswordResetService {
         try {
             await this.mail.sendEmail({
                 to: user.email,
-                subject: 'Код для сброса пароля Scribo',
-                html: `<p>Код: <b>${code}</b></p>`,
+                subject: 'Scribo password reset code',
+                html: `<p>Code: <b>${code}</b></p>`,
             });
         } catch (error) {
             console.error('Failed to send password reset email', error);
@@ -82,7 +82,7 @@ export class PasswordResetService {
         newPasswordConfirm: string;
     }) {
         if (input.newPassword !== input.newPasswordConfirm) {
-            throw fieldError('newPasswordConfirm', 'Пароли не совпадают');
+            throw fieldError('newPasswordConfirm', 'Passwords do not match');
         }
         const normalized = await this.assertResetCode(
             input.userEmail,
@@ -106,8 +106,8 @@ export class PasswordResetService {
             try {
                 await this.mail.sendEmail({
                     to: user.email,
-                    subject: 'Пароль аккаунта Scribo изменён',
-                    html: `<p>Пароль изменён.${settingsUrl ? ` <a href="${settingsUrl}">Сеансы</a>` : ''}</p>`,
+                    subject: 'Your Scribo password was changed',
+                    html: `<p>Password changed.${settingsUrl ? ` <a href="${settingsUrl}">Sessions</a>` : ''}</p>`,
                 });
             } catch (error) {
                 console.error('Failed to send password change email', error);

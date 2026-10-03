@@ -1,5 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+    ArrayMaxSize,
+    ArrayMinSize,
+    IsArray,
     IsMongoId,
     IsOptional,
     IsString,
@@ -33,6 +36,15 @@ export class EditMessageDto {
     @MinLength(FIELD_LIMITS.chatMessage.min)
     @MaxLength(FIELD_LIMITS.chatMessage.max)
     text!: string;
+}
+
+export class DeleteMessagesDto {
+    @ApiProperty({ type: [String] })
+    @IsArray()
+    @ArrayMinSize(1)
+    @ArrayMaxSize(100)
+    @IsMongoId({ each: true })
+    ids!: string[];
 }
 
 export class ListMessagesQueryDto {

@@ -71,7 +71,6 @@ describe('entitiesPipeline', () => {
             { $skip: 40 },
             { $limit: 20 },
         ]);
-        // Подсчёт страниц идёт по тому же отфильтрованному набору.
         expect(pipeline.indexOf(facet)).toBe(pipeline.length - 1);
     });
 });
@@ -124,7 +123,6 @@ describe('LogsQueryService.entities', () => {
 
         const pipeline = aggregate.mock.calls[0][0];
         const match = pipeline.filter((s: any) => '$match' in s).at(-1);
-        // Ввод пользователя идёт в запрос как литерал, а не как шаблон.
         expect(match.$match.name.$regex.test('Ma(')).toBe(true);
         expect(match.$match.name.$regex.test('Mx')).toBe(false);
         expect(

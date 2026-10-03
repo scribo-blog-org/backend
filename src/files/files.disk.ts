@@ -4,11 +4,6 @@ import { access, chmod, constants, mkdir, rm, writeFile } from 'fs/promises';
 import path from 'path';
 import { uploadsDir } from './files.config';
 
-/**
- * Нижний слой: только байты и пути на диске. Ничего не знает ни про
- * валидацию, ни про ссылки. Каталоги 755 и файлы 644, чтобы nginx под другим
- * пользователем мог читать том.
- */
 @Injectable()
 export class FilesDisk {
     readonly root: string;

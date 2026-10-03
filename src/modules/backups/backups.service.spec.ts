@@ -145,8 +145,6 @@ describe('BackupsService', () => {
         const svc = service(model);
         await svc.start('schedule');
         await idle(svc);
-        // Имя строится по секундам: два бекапа подряд в одну секунду невозможны,
-        // но в тесте они идут вплотную.
         await new Promise((r) => setTimeout(r, 1100));
         writeFileSync(path.join(uploads, 'src', 'b.png'), 'img');
         await svc.start('manual');

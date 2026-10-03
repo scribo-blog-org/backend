@@ -49,7 +49,7 @@ export class SessionService implements OnModuleInit {
                 }
             }
         } catch {
-            // index may not exist yet
+            void 0;
         }
     }
 
@@ -87,7 +87,7 @@ export class SessionService implements OnModuleInit {
         void this.mail
             .sendEmail({
                 to: user.email,
-                subject: 'Новый вход в аккаунт Scribo',
+                subject: 'New sign-in to your Scribo account',
                 html: loginAlertTemplate({
                     nickName: user.nick_name,
                     device: session.device,

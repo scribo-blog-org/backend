@@ -117,7 +117,7 @@ export async function lookupVisitorGeo(req: {
             return result;
         }
     } catch {
-        // fallback
+        void 0;
     }
 
     const fallback = { ip, city: '', region: '', country: '' };
