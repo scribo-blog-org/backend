@@ -579,6 +579,28 @@ export class ChatService {
             $set: { deleted_at: deletedAt },
         });
 
+        if (String(conversation.last_message_id) === String(message._id)) {
+            const latest = await this.messages
+                .findOne({
+                    conversation_id: conversation._id,
+                    deleted_at: null,
+                })
+                .sort({ _id: -1 })
+                .lean<MessageLean>();
+
+            await this.conversations.findByIdAndUpdate(conversation._id, {
+                $set: {
+                    last_message_id: latest?._id ?? null,
+                    last_message_text: latest?.text ?? '',
+                    last_message_at: latest ? this.messageDate(latest) : null,
+                },
+            });
+            await this.pushConversationUpdate(
+                String(conversation._id),
+                this.participantIds(conversation),
+            );
+        }
+
         const updated = await this.messages
             .findById(messageId)
             .populate('sender_id', '_id nick_name avatar')
