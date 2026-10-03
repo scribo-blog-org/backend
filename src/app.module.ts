@@ -55,8 +55,6 @@ import { publicKeyPem } from './config/jwt-keys';
         BackupsModule,
     ],
     controllers: [AppController],
-    providers: [
-        { provide: APP_INTERCEPTOR, useClass: ApiEnvelopeInterceptor },
-    ],
+    providers: [{ provide: APP_INTERCEPTOR, useClass: ApiEnvelopeInterceptor }],
 })
 export class AppModule {}
