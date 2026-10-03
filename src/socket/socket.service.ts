@@ -33,6 +33,20 @@ export class SocketService {
             });
     }
 
+    chatMessagesDeleted(
+        conversationId: string,
+        ids: string[],
+    ): Promise<void> {
+        return this.socketEvents
+            .chatMessagesDeleted(conversationId, ids)
+            .catch((error: unknown) => {
+                this.logger.error(
+                    `Failed to send chat deletions to ${conversationId}`,
+                    error instanceof Error ? error.stack : error,
+                );
+            });
+    }
+
     chatRead(
         conversationId: string,
         payload: unknown,

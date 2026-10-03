@@ -607,6 +607,113 @@ export class ChatService {
         return payload;
     }
 
+    async deleteMessages(ids: string[], actor: Actor) {
+        const unique = [...new Set(ids)];
+        const objectIds = unique.map((id) => new Types.ObjectId(id));
+        const rows = await this.messages
+            .find({ _id: { $in: objectIds } })
+            .lean<MessageLean[]>();
+
+        if (rows.length !== unique.length) {
+            throw new NotFoundException('Message not found');
+        }
+
+        const conversationIds = [
+            ...new Set(rows.map((row) => String(row.conversation_id))),
+        ];
+        const conversations = new Map<string, ConversationLean>();
+
+        for (const conversationId of conversationIds) {
+            conversations.set(
+                conversationId,
+                await this.getConversationForActor(conversationId, actor),
+            );
+        }
+
+        const deletedAt = new Date();
+        await this.messages.updateMany(
+            { _id: { $in: objectIds } },
+            { $set: { deleted_at: deletedAt } },
+        );
+
+        for (const [conversationId, conversation] of conversations) {
+            const removedLast = rows.some(
+                (row) =>
+                    String(row.conversation_id) === conversationId &&
+                    String(row._id) === String(conversation.last_message_id),
+            );
+
+            if (!removedLast) {
+                continue;
+            }
+
+            const latest = await this.messages
+                .findOne({
+                    conversation_id: conversation._id,
+                    deleted_at: null,
+                })
+                .sort({ _id: -1 })
+                .lean<MessageLean>();
+
+            await this.conversations.findByIdAndUpdate(conversation._id, {
+                $set: {
+                    last_message_id: latest?._id ?? null,
+                    last_message_text: latest?.text ?? '',
+                    last_message_at: latest
+                        ? this.messageDate(latest)
+                        : null,
+                },
+            });
+            await this.pushConversationUpdate(
+                conversationId,
+                this.participantIds(conversation),
+            );
+        }
+
+        for (const conversationId of conversationIds) {
+            const ids = rows
+                .filter((row) => String(row.conversation_id) === conversationId)
+                .map((row) => String(row._id));
+            await this.socketService.chatMessagesDeleted(conversationId, ids);
+        }
+
+        const updated = await this.messages
+            .find({ _id: { $in: objectIds } })
+            .populate('sender_id', '_id nick_name avatar')
+            .lean<MessageLean[]>();
+
+        const payloads = [];
+
+        for (const message of updated) {
+            const conversation = conversations.get(
+                String(message.conversation_id),
+            );
+
+            if (!conversation) {
+                continue;
+            }
+
+            const payload = {
+                ...this.serializeMessage(message, actor),
+                status: 'sent',
+                reply_preview: message.reply_to
+                    ? await this.buildReplyPreview(
+                          message.reply_to as Types.ObjectId,
+                      )
+                    : null,
+            };
+
+            this.socketService.chatMessage(
+                String(message.conversation_id),
+                payload,
+                this.participantIds(conversation),
+            );
+            payloads.push(payload);
+        }
+
+        return payloads;
+    }
+
     async editMessage(
         messageId: string,
         actor: Actor,
