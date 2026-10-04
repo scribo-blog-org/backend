@@ -11,4 +11,6 @@ export const FIELD_LIMITS = {
     supportMessage: { min: 10, max: 4_000 },
     supportReply: { min: 1, max: 4_000 },
     chatMessage: { min: 1, max: 4_000 },
+    groupName: { min: 1, max: 80 },
+    groupDescription: { min: 0, max: 200 },
 } as const;

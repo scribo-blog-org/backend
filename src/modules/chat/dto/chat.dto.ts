@@ -3,6 +3,7 @@ import {
     ArrayMaxSize,
     ArrayMinSize,
     IsArray,
+    IsIn,
     IsMongoId,
     IsOptional,
     IsString,
@@ -45,6 +46,44 @@ export class DeleteMessagesDto {
     @ArrayMaxSize(100)
     @IsMongoId({ each: true })
     ids!: string[];
+}
+
+export class CreateGroupDto {
+    @ApiProperty()
+    @IsString()
+    @MinLength(FIELD_LIMITS.groupName.min)
+    @MaxLength(FIELD_LIMITS.groupName.max)
+    name!: string;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsString()
+    @MaxLength(FIELD_LIMITS.groupDescription.max)
+    description?: string;
+
+    @ApiPropertyOptional({
+        description: 'JSON array of user ids to add as participants',
+    })
+    @IsOptional()
+    @IsString()
+    memberIds?: string;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsString()
+    removePhoto?: string;
+}
+
+export class AddGroupMemberDto {
+    @ApiProperty()
+    @IsMongoId()
+    userId!: string;
+}
+
+export class UpdateGroupMemberRoleDto {
+    @ApiProperty({ enum: ['admin', 'member'] })
+    @IsIn(['admin', 'member'])
+    role!: 'admin' | 'member';
 }
 
 export class ListMessagesQueryDto {
