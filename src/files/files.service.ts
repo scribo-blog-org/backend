@@ -6,8 +6,8 @@ import { UPLOADS_URL_PATH, uploadsPublicUrl } from './files.config';
 import { FilesDisk } from './files.disk';
 import { ALLOWED_IMAGE_MIME_TYPES, UPLOAD_LIMIT_SIZE } from './upload';
 
-export type ImageKind = 'avatar' | 'featured_image';
-export type ImageField = 'userAvatar' | 'featuredImage';
+export type ImageKind = 'avatar' | 'featured_image' | 'group';
+export type ImageField = 'userAvatar' | 'featuredImage' | 'groupPhoto';
 
 @Injectable()
 export class FilesService {

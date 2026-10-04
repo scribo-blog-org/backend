@@ -7,17 +7,24 @@ import {
     Patch,
     Post,
     Query,
+    UploadedFile,
+    UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../../authz/decorators/current-user.decorator';
+import { OptionalAuth } from '../../authz/decorators/public.decorator';
 import type { Actor } from '../../authz/policy';
+import { imageFileInterceptor } from '../../files/upload';
 import { ChatService } from './chat.service';
 import {
+    AddGroupMemberDto,
     CreateConversationDto,
+    CreateGroupDto,
     DeleteMessagesDto,
     EditMessageDto,
     ListMessagesQueryDto,
     SendMessageDto,
+    UpdateGroupMemberRoleDto,
 } from './dto/chat.dto';
 
 @ApiTags('chat')
@@ -38,6 +45,67 @@ export class ChatController {
         return { status: true, message: 'Conversations fetched', data };
     }
 
+    @Post('conversations/group')
+    @ApiConsumes('multipart/form-data')
+    @UseInterceptors(imageFileInterceptor('groupPhoto'))
+    async createGroup(
+        @Body() dto: CreateGroupDto,
+        @UploadedFile() photo: Express.Multer.File | undefined,
+        @CurrentUser() actor: Actor,
+    ) {
+        const data = await this.chat.createGroup(actor, dto, photo);
+        return { status: true, message: 'Group created', data };
+    }
+
+    @Patch('conversations/:id/group')
+    @ApiConsumes('multipart/form-data')
+    @UseInterceptors(imageFileInterceptor('groupPhoto'))
+    async updateGroup(
+        @Param('id') id: string,
+        @Body() dto: CreateGroupDto,
+        @UploadedFile() photo: Express.Multer.File | undefined,
+        @CurrentUser() actor: Actor,
+    ) {
+        const data = await this.chat.updateGroup(id, actor, dto, photo);
+        return { status: true, message: 'Group updated', data };
+    }
+
+    @Post('conversations/:id/members')
+    async addMember(
+        @Param('id') id: string,
+        @Body() dto: AddGroupMemberDto,
+        @CurrentUser() actor: Actor,
+    ) {
+        const data = await this.chat.addGroupMember(id, actor, dto.userId);
+        return { status: true, message: 'Member added', data };
+    }
+
+    @Delete('conversations/:id/members/:userId')
+    async removeMember(
+        @Param('id') id: string,
+        @Param('userId') userId: string,
+        @CurrentUser() actor: Actor,
+    ) {
+        const data = await this.chat.removeGroupMember(id, actor, userId);
+        return { status: true, message: 'Member removed', data };
+    }
+
+    @Patch('conversations/:id/members/:userId')
+    async updateMemberRole(
+        @Param('id') id: string,
+        @Param('userId') userId: string,
+        @Body() dto: UpdateGroupMemberRoleDto,
+        @CurrentUser() actor: Actor,
+    ) {
+        const data = await this.chat.updateGroupMemberRole(
+            id,
+            actor,
+            userId,
+            dto.role,
+        );
+        return { status: true, message: 'Role updated', data };
+    }
+
     @Post('conversations')
     async createConversation(
         @Body() dto: CreateConversationDto,
@@ -45,6 +113,19 @@ export class ChatController {
     ) {
         const data = await this.chat.createConversation(actor, dto.userId);
         return { status: true, message: 'Conversation ready', data };
+    }
+
+    @OptionalAuth()
+    @Get('conversations/:id/invite')
+    async groupInvite(@Param('id') id: string, @CurrentUser() actor?: Actor) {
+        const data = await this.chat.getGroupInvite(id, actor);
+        return { status: true, message: 'Group invite fetched', data };
+    }
+
+    @Post('conversations/:id/join')
+    async joinGroup(@Param('id') id: string, @CurrentUser() actor: Actor) {
+        const data = await this.chat.joinGroup(id, actor);
+        return { status: true, message: 'Joined the group', data };
     }
 
     @Get('conversations/:id')

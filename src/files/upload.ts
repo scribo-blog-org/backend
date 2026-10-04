@@ -11,7 +11,9 @@ export const ALLOWED_IMAGE_MIME_TYPES = [
     'image/jpg',
 ];
 
-export function imageFileInterceptor(field: 'userAvatar' | 'featuredImage') {
+export function imageFileInterceptor(
+    field: 'userAvatar' | 'featuredImage' | 'groupPhoto',
+) {
     return FileInterceptor(field, {
         limits: { fileSize: UPLOAD_LIMIT_SIZE },
         fileFilter: (_req, file, callback) => {
