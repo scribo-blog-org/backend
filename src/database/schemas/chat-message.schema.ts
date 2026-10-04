@@ -4,6 +4,18 @@ import { FIELD_LIMITS } from '../../validation/field-limits';
 
 export type ChatMessageDocument = HydratedDocument<ChatMessage>;
 
+export const CHAT_SYSTEM_EVENTS = [
+    'member_joined',
+    'member_added',
+    'member_removed',
+    'member_left',
+    'group_updated',
+    'admin_granted',
+    'admin_revoked',
+] as const;
+
+export type ChatSystemEvent = (typeof CHAT_SYSTEM_EVENTS)[number];
+
 @Schema({ collection: 'chat_messages', timestamps: true })
 export class ChatMessage {
     @Prop({
@@ -26,6 +38,9 @@ export class ChatMessage {
 
     @Prop({ type: Types.ObjectId, ref: 'ChatMessage', default: null })
     reply_to?: Types.ObjectId | null;
+
+    @Prop({ type: String, enum: CHAT_SYSTEM_EVENTS, default: null })
+    system_event?: ChatSystemEvent | null;
 
     @Prop({ type: Date, default: null })
     deleted_at?: Date | null;

@@ -11,7 +11,10 @@ import type { Actor } from '../../authz/policy';
 import { FIELD_LIMITS } from '../../validation/field-limits';
 import { MailService } from '../../infra/mail.service';
 import { LoggerService } from '../../infra/logger.service';
-import { ChatMessage } from '../../database/schemas/chat-message.schema';
+import {
+    ChatMessage,
+    type ChatSystemEvent,
+} from '../../database/schemas/chat-message.schema';
 import {
     Conversation,
     type ConversationRole,
@@ -40,6 +43,7 @@ type MessageLean = {
     sender_id: Types.ObjectId | UserLean;
     text: string;
     reply_to?: Types.ObjectId | null;
+    system_event?: ChatSystemEvent | null;
     deleted_at?: Date | null;
     edited_at?: Date | null;
     createdAt?: Date;
@@ -210,6 +214,7 @@ export class ChatService {
                 ? { _id: String(message.sender_id) }
                 : this.serializeUser(message.sender_id as UserLean);
         const createdAt = this.messageDate(message);
+        const systemEvent = message.system_event || null;
 
         return {
             _id: String(message._id),
@@ -217,10 +222,11 @@ export class ChatService {
             sender,
             text: message.deleted_at ? '' : message.text,
             reply_to: message.reply_to ? String(message.reply_to) : null,
+            system_event: systemEvent,
             deleted_at: message.deleted_at || null,
             edited_at: message.edited_at || null,
             created_at: createdAt,
-            is_own: String(sender?._id) === actor.id,
+            is_own: !systemEvent && String(sender?._id) === actor.id,
         };
     }
 
@@ -248,6 +254,7 @@ export class ChatService {
                 const count = await this.messages.countDocuments({
                     conversation_id: conversation._id,
                     sender_id: { $ne: this.assertObjectId(userId) },
+                    system_event: null,
                     deleted_at: null,
                     ...(lastRead
                         ? { createdAt: { $gt: new Date(lastRead) } }
@@ -278,6 +285,7 @@ export class ChatService {
         return this.messages.countDocuments({
             conversation_id: row._id,
             sender_id: { $ne: this.assertObjectId(userId) },
+            system_event: null,
             deleted_at: null,
             ...(lastRead ? { createdAt: { $gt: new Date(lastRead) } } : {}),
         });
@@ -450,6 +458,59 @@ export class ChatService {
         }
     }
 
+    private async actorNick(actor: Actor) {
+        return actor.nick_name || (await this.senderNick(actor.id)) || 'User';
+    }
+
+    private async memberNick(userId: string) {
+        return (await this.senderNick(userId)) || 'User';
+    }
+
+    private async addSystemMessage(
+        conversation: ConversationLean,
+        actorId: string,
+        event: ChatSystemEvent,
+        text: string,
+        recipientIds?: string[],
+    ) {
+        const created = await this.messages.create({
+            conversation_id: conversation._id,
+            sender_id: this.assertObjectId(actorId),
+            text,
+            system_event: event,
+        });
+        const createdAt =
+            (created.get('createdAt') as Date | undefined) || new Date();
+
+        await this.conversations.findByIdAndUpdate(conversation._id, {
+            $set: {
+                last_message_id: created._id,
+                last_message_text: text,
+                last_message_sender_name: '',
+                last_message_at: createdAt,
+            },
+        });
+
+        this.socketService.chatMessage(
+            String(conversation._id),
+            {
+                _id: String(created._id),
+                conversation_id: String(conversation._id),
+                sender: { _id: actorId },
+                text,
+                reply_to: null,
+                reply_preview: null,
+                system_event: event,
+                deleted_at: null,
+                edited_at: null,
+                created_at: createdAt,
+                is_own: false,
+                status: null,
+            },
+            recipientIds ?? this.participantIds(conversation),
+        );
+    }
+
     private notifyChatStarted(
         recipient: { email?: string | null; nick_name?: string | null },
         initiatorNickName: string | null | undefined,
@@ -529,11 +590,14 @@ export class ChatService {
             .find({
                 _id: { $in: missing.map((row) => row.last_message_id) },
             })
-            .select('_id sender_id')
+            .select('_id sender_id system_event')
             .populate('sender_id', 'nick_name')
             .lean<MessageLean[]>();
         const names = new Map<string, string>();
         for (const message of messages) {
+            if (message.system_event) {
+                continue;
+            }
             names.set(
                 String(message._id),
                 await this.senderNick(message.sender_id),
@@ -712,7 +776,7 @@ export class ChatService {
         photo?: Express.Multer.File,
     ) {
         const conversation = await this.getConversationForActor(id, actor);
-        this.assertGroupAdmin(conversation, actor);
+        this.assertGroup(conversation);
 
         const update: Record<string, unknown> = {};
         if (input.name !== undefined) {
@@ -759,6 +823,12 @@ export class ChatService {
             await this.conversations.findByIdAndUpdate(conversation._id, {
                 $set: update,
             });
+            await this.addSystemMessage(
+                conversation,
+                actor.id,
+                'group_updated',
+                `${await this.actorNick(actor)} updated the group`,
+            );
             await this.pushConversationUpdate(
                 String(conversation._id),
                 this.participantIds(conversation),
@@ -773,17 +843,29 @@ export class ChatService {
 
     async addGroupMember(id: string, actor: Actor, userId: string) {
         const conversation = await this.getConversationForActor(id, actor);
-        this.assertGroupAdmin(conversation, actor);
+        this.assertGroup(conversation);
         if (userId === actor.id) {
             throw new BadRequestException(
                 'This person is already in the group',
             );
         }
         await this.insertGroupMember(conversation, userId);
-        return this.serializeDetail(
-            await this.reloadConversation(String(conversation._id)),
-            actor,
+
+        const reloaded = await this.reloadConversation(
+            String(conversation._id),
         );
+        await this.addSystemMessage(
+            reloaded,
+            actor.id,
+            'member_added',
+            `${await this.actorNick(actor)} added ${await this.memberNick(userId)}`,
+        );
+        await this.pushConversationUpdate(
+            String(reloaded._id),
+            this.participantIds(reloaded),
+        );
+
+        return this.serializeDetail(reloaded, actor);
     }
 
     async getGroupInvite(id: string, actor?: Actor) {
@@ -818,10 +900,22 @@ export class ChatService {
         }
 
         await this.insertGroupMember(conversation, actor.id);
-        return this.serializeDetail(
-            await this.reloadConversation(String(conversation._id)),
-            actor,
+
+        const reloaded = await this.reloadConversation(
+            String(conversation._id),
         );
+        await this.addSystemMessage(
+            reloaded,
+            actor.id,
+            'member_joined',
+            `${await this.actorNick(actor)} joined via the invite link`,
+        );
+        await this.pushConversationUpdate(
+            String(reloaded._id),
+            this.participantIds(reloaded),
+        );
+
+        return this.serializeDetail(reloaded, actor);
     }
 
     private async insertGroupMember(
@@ -882,6 +976,8 @@ export class ChatService {
             return this.deleteConversation(id, actor);
         }
 
+        const targetNick = await this.memberNick(userId);
+
         await this.conversations.findByIdAndUpdate(conversation._id, {
             $pull: {
                 participants: this.assertObjectId(userId),
@@ -895,6 +991,20 @@ export class ChatService {
         const stayIds = this.participantIds(conversation).filter(
             (participantId) => participantId !== userId,
         );
+
+        if (this.isGroup(conversation)) {
+            const isLeaving = userId === actor.id;
+            await this.addSystemMessage(
+                conversation,
+                actor.id,
+                isLeaving ? 'member_left' : 'member_removed',
+                isLeaving
+                    ? `${targetNick} left the group`
+                    : `${await this.actorNick(actor)} removed ${targetNick}`,
+                stayIds,
+            );
+        }
+
         await this.pushConversationUpdate(id, stayIds);
 
         if (userId === actor.id) {
@@ -936,6 +1046,18 @@ export class ChatService {
             },
             { $set: { 'members.$.role': role } },
         );
+
+        const actorNick = await this.actorNick(actor);
+        const targetNick = await this.memberNick(userId);
+        await this.addSystemMessage(
+            conversation,
+            actor.id,
+            role === 'admin' ? 'admin_granted' : 'admin_revoked',
+            role === 'admin'
+                ? `${actorNick} made ${targetNick} an administrator`
+                : `${actorNick} removed administrator rights from ${targetNick}`,
+        );
+
         await this.pushConversationUpdate(
             String(conversation._id),
             this.participantIds(conversation),
@@ -1137,6 +1259,9 @@ export class ChatService {
         if (!message) {
             throw new NotFoundException('Message not found');
         }
+        if (message.system_event) {
+            throw new BadRequestException('System messages cannot be deleted');
+        }
         const conversation = await this.getConversationForActor(
             String(message.conversation_id),
             actor,
@@ -1160,9 +1285,10 @@ export class ChatService {
                 $set: {
                     last_message_id: latest?._id ?? null,
                     last_message_text: latest?.text ?? '',
-                    last_message_sender_name: latest
-                        ? await this.senderNick(latest.sender_id)
-                        : '',
+                    last_message_sender_name:
+                        latest && !latest.system_event
+                            ? await this.senderNick(latest.sender_id)
+                            : '',
                     last_message_at: latest ? this.messageDate(latest) : null,
                 },
             });
@@ -1210,6 +1336,9 @@ export class ChatService {
         if (rows.length !== unique.length) {
             throw new NotFoundException('Message not found');
         }
+        if (rows.some((row) => row.system_event)) {
+            throw new BadRequestException('System messages cannot be deleted');
+        }
 
         const conversationIds = [
             ...new Set(rows.map((row) => String(row.conversation_id))),
@@ -1252,9 +1381,10 @@ export class ChatService {
                 $set: {
                     last_message_id: latest?._id ?? null,
                     last_message_text: latest?.text ?? '',
-                    last_message_sender_name: latest
-                        ? await this.senderNick(latest.sender_id)
-                        : '',
+                    last_message_sender_name:
+                        latest && !latest.system_event
+                            ? await this.senderNick(latest.sender_id)
+                            : '',
                     last_message_at: latest ? this.messageDate(latest) : null,
                 },
             });
@@ -1318,6 +1448,9 @@ export class ChatService {
             .lean<MessageLean>();
         if (!message) {
             throw new NotFoundException('Message not found');
+        }
+        if (message.system_event) {
+            throw new BadRequestException('System messages cannot be edited');
         }
         if (String(message.sender_id) !== actor.id) {
             throw new ForbiddenException("You can't edit this message");
