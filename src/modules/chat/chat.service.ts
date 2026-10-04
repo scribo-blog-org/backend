@@ -12,11 +12,17 @@ import { FIELD_LIMITS } from '../../validation/field-limits';
 import { MailService } from '../../infra/mail.service';
 import { LoggerService } from '../../infra/logger.service';
 import { ChatMessage } from '../../database/schemas/chat-message.schema';
-import { Conversation } from '../../database/schemas/conversation.schema';
+import {
+    Conversation,
+    type ConversationRole,
+} from '../../database/schemas/conversation.schema';
 import { User } from '../../database/schemas/user.schema';
+import { FilesService } from '../../files/files.service';
 import { SocketService } from '../../socket/socket.service';
 import { UsersService } from '../users/users.service';
 import { chatStartedEmailTemplate } from './chat-started-email';
+
+const MAX_GROUP_MEMBERS = 50;
 
 type UserLean = {
     _id: Types.ObjectId;
@@ -44,8 +50,14 @@ type ConversationLean = {
     _id: Types.ObjectId;
     participants: Types.ObjectId[];
     participant_key: string;
+    kind?: 'direct' | 'group';
+    title?: string;
+    description?: string;
+    photo?: string | null;
+    members?: { user_id: Types.ObjectId; role: ConversationRole }[];
     last_message_id?: Types.ObjectId | null;
     last_message_text: string;
+    last_message_sender_name?: string;
     last_message_at?: Date | null;
     last_read_at?: Record<string, Date>;
     createdAt?: Date;
@@ -61,6 +73,7 @@ export class ChatService {
         @InjectModel(User.name) private readonly users: Model<User>,
         private readonly usersService: UsersService,
         private readonly socketService: SocketService,
+        private readonly files: FilesService,
         private readonly mail: MailService,
         private readonly config: ConfigService,
         private readonly logger: LoggerService,
@@ -68,6 +81,47 @@ export class ChatService {
 
     private participantKey(a: string, b: string) {
         return [String(a), String(b)].sort().join(':');
+    }
+
+    private isGroup(conversation: ConversationLean) {
+        return conversation.kind === 'group';
+    }
+
+    private roleOf(conversation: ConversationLean, userId: string) {
+        const member = (conversation.members || []).find(
+            (item) => String(item.user_id) === userId,
+        );
+        if (member) {
+            return member.role;
+        }
+        if (
+            !this.isGroup(conversation) &&
+            this.participantIds(conversation).includes(userId)
+        ) {
+            return 'member' as const;
+        }
+        return null;
+    }
+
+    private assertGroup(conversation: ConversationLean) {
+        if (!this.isGroup(conversation)) {
+            throw new BadRequestException('This conversation is not a group');
+        }
+    }
+
+    private assertGroupAdmin(conversation: ConversationLean, actor: Actor) {
+        this.assertGroup(conversation);
+        if (this.roleOf(conversation, actor.id) !== 'admin') {
+            throw new ForbiddenException(
+                'Only administrators can change the group',
+            );
+        }
+    }
+
+    private adminCount(conversation: ConversationLean) {
+        return (conversation.members || []).filter(
+            (member) => member.role === 'admin',
+        ).length;
     }
 
     private assertObjectId(value: string, label = 'id') {
@@ -233,16 +287,147 @@ export class ChatService {
         row: ConversationLean,
         userId: string,
     ) {
-        const otherId = this.otherParticipantId(row, userId);
         const unread = await this.unreadForConversation(row, userId);
-
-        return {
+        const base = {
             _id: String(row._id),
-            participant: await this.serializeParticipant(otherId, userId),
             last_message_text: row.last_message_text,
+            last_message_sender_name: row.last_message_sender_name || '',
             last_message_at: row.last_message_at,
             unread,
         };
+
+        if (this.isGroup(row)) {
+            return {
+                ...base,
+                kind: 'group' as const,
+                title: row.title || 'Group',
+                description: row.description || '',
+                photo: row.photo || null,
+                member_count: row.participants.length,
+                my_role: this.roleOf(row, userId),
+                participant: null,
+            };
+        }
+
+        const otherId = this.otherParticipantId(row, userId);
+        return {
+            ...base,
+            kind: 'direct' as const,
+            participant: await this.serializeParticipant(otherId, userId),
+        };
+    }
+
+    private async serializeGroupMembers(
+        conversation: ConversationLean,
+        viewerId: string,
+    ) {
+        const users = await this.users
+            .find({ _id: { $in: conversation.participants } })
+            .select(
+                '_id nick_name avatar is_verified last_activity_at is_last_activity_public',
+            )
+            .lean<UserLean[]>();
+        const byId = new Map(users.map((user) => [String(user._id), user]));
+
+        return conversation.participants
+            .map((id) => {
+                const user = byId.get(String(id));
+                const isOwner = String(id) === viewerId;
+                const activityPublic = user?.is_last_activity_public !== false;
+                return {
+                    _id: String(id),
+                    nick_name: user?.nick_name || 'User',
+                    avatar: user?.avatar || null,
+                    is_verified: Boolean(user?.is_verified),
+                    role: this.roleOf(conversation, String(id)) || 'member',
+                    is_last_activity_public: activityPublic,
+                    last_activity_at:
+                        isOwner || activityPublic
+                            ? user?.last_activity_at || null
+                            : null,
+                };
+            })
+            .sort((a, b) => {
+                if (a.role !== b.role) {
+                    return a.role === 'admin' ? -1 : 1;
+                }
+                return a.nick_name.localeCompare(b.nick_name);
+            });
+    }
+
+    private async serializeDetail(
+        conversation: ConversationLean,
+        actor: Actor,
+    ) {
+        if (!this.isGroup(conversation)) {
+            const otherId = this.otherParticipantId(conversation, actor.id);
+            return {
+                _id: String(conversation._id),
+                kind: 'direct' as const,
+                participant: await this.serializeParticipant(otherId, actor.id),
+                last_read_at: conversation.last_read_at || {},
+            };
+        }
+
+        return {
+            _id: String(conversation._id),
+            kind: 'group' as const,
+            title: conversation.title || '',
+            description: conversation.description || '',
+            photo: conversation.photo || null,
+            my_role: this.roleOf(conversation, actor.id),
+            members: await this.serializeGroupMembers(conversation, actor.id),
+            last_read_at: conversation.last_read_at || {},
+            participant: null,
+        };
+    }
+
+    private parseMemberIds(raw?: string) {
+        if (!raw?.trim()) {
+            return [];
+        }
+
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(raw);
+        } catch {
+            throw new BadRequestException('Invalid member list');
+        }
+
+        if (!Array.isArray(parsed)) {
+            throw new BadRequestException('Invalid member list');
+        }
+
+        const ids = [...new Set(parsed.map((id) => String(id)))];
+        if (ids.some((id) => !Types.ObjectId.isValid(id))) {
+            throw new BadRequestException('Invalid member');
+        }
+        return ids;
+    }
+
+    private async assertUsersExist(ids: string[]) {
+        if (!ids.length) {
+            return;
+        }
+        const found = await this.users
+            .find({
+                _id: { $in: ids.map((id) => this.assertObjectId(id)) },
+            })
+            .select('_id')
+            .lean<Array<{ _id: Types.ObjectId }>>();
+        if (found.length !== ids.length) {
+            throw new NotFoundException('User not found');
+        }
+    }
+
+    private async reloadConversation(id: string) {
+        const conversation = await this.conversations
+            .findById(id)
+            .lean<ConversationLean>();
+        if (!conversation) {
+            throw new NotFoundException('Conversation not found');
+        }
+        return conversation;
     }
 
     private async pushConversationUpdate(
@@ -302,11 +487,72 @@ export class ChatService {
         return { unread: await this.unreadCountForUser(actor.id) };
     }
 
+    private async senderNick(
+        sender: MessageLean['sender_id'] | string | null | undefined,
+    ) {
+        if (
+            sender &&
+            typeof sender === 'object' &&
+            'nick_name' in sender &&
+            sender.nick_name
+        ) {
+            return sender.nick_name;
+        }
+
+        const id =
+            sender && typeof sender === 'object' && '_id' in sender
+                ? String(sender._id)
+                : String(sender || '');
+        if (!Types.ObjectId.isValid(id)) {
+            return '';
+        }
+
+        const user = await this.users
+            .findById(id)
+            .select('nick_name')
+            .lean<{ nick_name?: string }>();
+        return user?.nick_name || '';
+    }
+
+    private async fillMissingSenderNames(rows: ConversationLean[]) {
+        const missing = rows.filter(
+            (row) =>
+                row.last_message_text &&
+                !row.last_message_sender_name &&
+                row.last_message_id,
+        );
+        if (!missing.length) {
+            return;
+        }
+
+        const messages = await this.messages
+            .find({
+                _id: { $in: missing.map((row) => row.last_message_id) },
+            })
+            .select('_id sender_id')
+            .populate('sender_id', 'nick_name')
+            .lean<MessageLean[]>();
+        const names = new Map<string, string>();
+        for (const message of messages) {
+            names.set(
+                String(message._id),
+                await this.senderNick(message.sender_id),
+            );
+        }
+
+        for (const row of missing) {
+            row.last_message_sender_name =
+                names.get(String(row.last_message_id)) || '';
+        }
+    }
+
     async listConversations(actor: Actor) {
         const rows = await this.conversations
             .find({ participants: this.assertObjectId(actor.id) })
             .sort({ last_message_at: -1, updatedAt: -1 })
             .lean<ConversationLean[]>();
+
+        await this.fillMissingSenderNames(rows);
 
         const items = await Promise.all(
             rows.map((row) =>
@@ -336,6 +582,7 @@ export class ChatService {
         if (!conversation) {
             const created = await this.conversations.create({
                 participant_key,
+                kind: 'direct',
                 participants: [
                     this.assertObjectId(actor.id),
                     this.assertObjectId(otherUserId),
@@ -376,19 +623,332 @@ export class ChatService {
 
         return {
             _id: String(conversation._id),
+            kind: 'direct' as const,
             participant: await this.serializeParticipant(otherUserId, actor.id),
         };
     }
 
-    async getConversation(id: string, actor: Actor) {
+    async createGroup(
+        actor: Actor,
+        input: { name: string; description?: string; memberIds?: string },
+        photo?: Express.Multer.File,
+    ) {
+        const title = String(input.name || '').trim();
+        const description = String(input.description || '').trim();
+        if (
+            title.length < FIELD_LIMITS.groupName.min ||
+            title.length > FIELD_LIMITS.groupName.max
+        ) {
+            throw new BadRequestException('Invalid group name');
+        }
+        if (description.length > FIELD_LIMITS.groupDescription.max) {
+            throw new BadRequestException('Invalid group description');
+        }
+
+        const memberIds = this.parseMemberIds(input.memberIds).filter(
+            (id) => id !== actor.id,
+        );
+        if (memberIds.length + 1 > MAX_GROUP_MEMBERS) {
+            throw new BadRequestException('This group is full');
+        }
+        await this.assertUsersExist(memberIds);
+
+        const id = new Types.ObjectId();
+        let photoUrl: string | null = null;
+        if (photo) {
+            photoUrl = await this.files.saveImage(
+                photo,
+                'group',
+                String(id),
+                'groupPhoto',
+            );
+        }
+
+        const participantIds = [actor.id, ...memberIds];
+        const now = new Date();
+        try {
+            await this.conversations.create({
+                _id: id,
+                participant_key: `group:${String(id)}`,
+                kind: 'group',
+                title,
+                description,
+                photo: photoUrl,
+                participants: participantIds.map((userId) =>
+                    this.assertObjectId(userId),
+                ),
+                members: participantIds.map((userId) => ({
+                    user_id: this.assertObjectId(userId),
+                    role: userId === actor.id ? 'admin' : 'member',
+                })),
+                last_message_text: '',
+                last_read_at: Object.fromEntries(
+                    participantIds.map((userId) => [userId, now]),
+                ),
+            });
+        } catch (error) {
+            if (photoUrl) {
+                await this.files.remove(photoUrl);
+            }
+            throw error;
+        }
+
+        await this.logger.action('create_group', actor, {
+            conversation: String(id),
+            title,
+            members: memberIds.length,
+        });
+        await this.pushConversationUpdate(String(id), participantIds);
+        return this.serializeDetail(
+            await this.reloadConversation(String(id)),
+            actor,
+        );
+    }
+
+    async updateGroup(
+        id: string,
+        actor: Actor,
+        input: { name?: string; description?: string; removePhoto?: string },
+        photo?: Express.Multer.File,
+    ) {
         const conversation = await this.getConversationForActor(id, actor);
-        const otherId = this.otherParticipantId(conversation, actor.id);
+        this.assertGroupAdmin(conversation, actor);
+
+        const update: Record<string, unknown> = {};
+        if (input.name !== undefined) {
+            const title = String(input.name).trim();
+            if (
+                title.length < FIELD_LIMITS.groupName.min ||
+                title.length > FIELD_LIMITS.groupName.max
+            ) {
+                throw new BadRequestException('Invalid group name');
+            }
+            update.title = title;
+        }
+        if (input.description !== undefined) {
+            const description = String(input.description).trim();
+            if (description.length > FIELD_LIMITS.groupDescription.max) {
+                throw new BadRequestException('Invalid group description');
+            }
+            update.description = description;
+        }
+
+        const removePhoto =
+            input.removePhoto === 'true' || input.removePhoto === '1';
+        if (photo || removePhoto) {
+            if (conversation.photo) {
+                await this.files.remove(conversation.photo);
+            }
+            if (photo) {
+                const url = await this.files.saveImage(
+                    photo,
+                    'group',
+                    String(conversation._id),
+                    'groupPhoto',
+                );
+                if (!url) {
+                    throw new BadRequestException('Could not save group photo');
+                }
+                update.photo = url;
+            } else {
+                update.photo = null;
+            }
+        }
+
+        if (Object.keys(update).length) {
+            await this.conversations.findByIdAndUpdate(conversation._id, {
+                $set: update,
+            });
+            await this.pushConversationUpdate(
+                String(conversation._id),
+                this.participantIds(conversation),
+            );
+        }
+
+        return this.serializeDetail(
+            await this.reloadConversation(String(conversation._id)),
+            actor,
+        );
+    }
+
+    async addGroupMember(id: string, actor: Actor, userId: string) {
+        const conversation = await this.getConversationForActor(id, actor);
+        this.assertGroupAdmin(conversation, actor);
+        if (userId === actor.id) {
+            throw new BadRequestException(
+                'This person is already in the group',
+            );
+        }
+        await this.insertGroupMember(conversation, userId);
+        return this.serializeDetail(
+            await this.reloadConversation(String(conversation._id)),
+            actor,
+        );
+    }
+
+    async getGroupInvite(id: string, actor?: Actor) {
+        const conversation = await this.conversations
+            .findById(id)
+            .lean<ConversationLean>();
+        if (!conversation || !this.isGroup(conversation)) {
+            throw new NotFoundException('Conversation not found');
+        }
 
         return {
             _id: String(conversation._id),
-            participant: await this.serializeParticipant(otherId, actor.id),
-            last_read_at: conversation.last_read_at || {},
+            title: conversation.title || 'Group',
+            description: conversation.description || '',
+            photo: conversation.photo || null,
+            member_count: conversation.participants.length,
+            joined: actor
+                ? this.participantIds(conversation).includes(actor.id)
+                : false,
         };
+    }
+
+    async joinGroup(id: string, actor: Actor) {
+        const conversation = await this.conversations
+            .findById(id)
+            .lean<ConversationLean>();
+        if (!conversation || !this.isGroup(conversation)) {
+            throw new NotFoundException('Conversation not found');
+        }
+        if (this.participantIds(conversation).includes(actor.id)) {
+            return this.serializeDetail(conversation, actor);
+        }
+
+        await this.insertGroupMember(conversation, actor.id);
+        return this.serializeDetail(
+            await this.reloadConversation(String(conversation._id)),
+            actor,
+        );
+    }
+
+    private async insertGroupMember(
+        conversation: ConversationLean,
+        userId: string,
+    ) {
+        if (this.participantIds(conversation).includes(userId)) {
+            throw new BadRequestException(
+                'This person is already in the group',
+            );
+        }
+        if (conversation.participants.length >= MAX_GROUP_MEMBERS) {
+            throw new BadRequestException('This group is full');
+        }
+        await this.assertUsersExist([userId]);
+
+        const now = new Date();
+        await this.conversations.findByIdAndUpdate(conversation._id, {
+            $addToSet: {
+                participants: this.assertObjectId(userId),
+                members: {
+                    user_id: this.assertObjectId(userId),
+                    role: 'member',
+                },
+            },
+            $set: { [`last_read_at.${userId}`]: now },
+        });
+
+        await this.pushConversationUpdate(String(conversation._id), [
+            ...this.participantIds(conversation),
+            userId,
+        ]);
+    }
+
+    async removeGroupMember(id: string, actor: Actor, userId: string) {
+        const conversation = await this.getConversationForActor(id, actor);
+        this.assertGroup(conversation);
+        if (!this.participantIds(conversation).includes(userId)) {
+            throw new NotFoundException('Member not found');
+        }
+        if (userId !== actor.id) {
+            this.assertGroupAdmin(conversation, actor);
+        }
+
+        const targetRole = this.roleOf(conversation, userId);
+        const remaining = conversation.participants.length - 1;
+        if (
+            targetRole === 'admin' &&
+            this.adminCount(conversation) <= 1 &&
+            remaining > 0
+        ) {
+            throw new BadRequestException(
+                'Promote another administrator before leaving',
+            );
+        }
+
+        if (remaining === 0) {
+            return this.deleteConversation(id, actor);
+        }
+
+        await this.conversations.findByIdAndUpdate(conversation._id, {
+            $pull: {
+                participants: this.assertObjectId(userId),
+                members: { user_id: this.assertObjectId(userId) },
+            },
+            $unset: { [`last_read_at.${userId}`]: '' },
+        });
+
+        this.socketService.chatConversationDeleted(userId, id);
+        await this.pushUnread(userId);
+        const stayIds = this.participantIds(conversation).filter(
+            (participantId) => participantId !== userId,
+        );
+        await this.pushConversationUpdate(id, stayIds);
+
+        if (userId === actor.id) {
+            return { _id: id, left: true };
+        }
+
+        return this.serializeDetail(await this.reloadConversation(id), actor);
+    }
+
+    async updateGroupMemberRole(
+        id: string,
+        actor: Actor,
+        userId: string,
+        role: ConversationRole,
+    ) {
+        const conversation = await this.getConversationForActor(id, actor);
+        this.assertGroupAdmin(conversation, actor);
+        if (!this.participantIds(conversation).includes(userId)) {
+            throw new NotFoundException('Member not found');
+        }
+        const current = this.roleOf(conversation, userId);
+        if (current === role) {
+            return this.serializeDetail(conversation, actor);
+        }
+        if (
+            current === 'admin' &&
+            role === 'member' &&
+            this.adminCount(conversation) <= 1
+        ) {
+            throw new BadRequestException(
+                'The group needs at least one administrator',
+            );
+        }
+
+        await this.conversations.findOneAndUpdate(
+            {
+                _id: conversation._id,
+                'members.user_id': this.assertObjectId(userId),
+            },
+            { $set: { 'members.$.role': role } },
+        );
+        await this.pushConversationUpdate(
+            String(conversation._id),
+            this.participantIds(conversation),
+        );
+        return this.serializeDetail(
+            await this.reloadConversation(String(conversation._id)),
+            actor,
+        );
+    }
+
+    async getConversation(id: string, actor: Actor) {
+        const conversation = await this.getConversationForActor(id, actor);
+        return this.serializeDetail(conversation, actor);
     }
 
     async listMessages(
@@ -433,8 +993,9 @@ export class ChatService {
             conversationId,
             actor,
         );
-        const otherId = this.otherParticipantId(conversation, actor.id);
-        const otherLastRead = conversation.last_read_at?.[otherId];
+        const otherIds = this.participantIds(conversation).filter(
+            (participantId) => participantId !== actor.id,
+        );
 
         const items = rows.reverse().map((row) => {
             const base = this.serializeMessage(row, actor);
@@ -442,10 +1003,13 @@ export class ChatService {
                 ? replyMap.get(String(row.reply_to))
                 : null;
             const createdAt = this.messageDate(row);
+            const allRead = otherIds.every((participantId) => {
+                const readAt = conversation.last_read_at?.[participantId];
+                return readAt && new Date(readAt) >= new Date(createdAt);
+            });
             const status =
                 String(base.sender?._id) === actor.id
-                    ? otherLastRead &&
-                      new Date(otherLastRead) >= new Date(createdAt)
+                    ? allRead
                         ? 'read'
                         : 'sent'
                     : null;
@@ -516,6 +1080,7 @@ export class ChatService {
             $set: {
                 last_message_id: created._id,
                 last_message_text: text,
+                last_message_sender_name: actor.nick_name || '',
                 last_message_at: new Date(),
             },
         });
@@ -540,8 +1105,11 @@ export class ChatService {
             participantIds,
         );
 
-        const otherId = this.otherParticipantId(conversation, actor.id);
-        await this.pushUnread(otherId);
+        await Promise.all(
+            participantIds
+                .filter((participantId) => participantId !== actor.id)
+                .map((participantId) => this.pushUnread(participantId)),
+        );
 
         return payload;
     }
@@ -592,6 +1160,9 @@ export class ChatService {
                 $set: {
                     last_message_id: latest?._id ?? null,
                     last_message_text: latest?.text ?? '',
+                    last_message_sender_name: latest
+                        ? await this.senderNick(latest.sender_id)
+                        : '',
                     last_message_at: latest ? this.messageDate(latest) : null,
                 },
             });
@@ -681,6 +1252,9 @@ export class ChatService {
                 $set: {
                     last_message_id: latest?._id ?? null,
                     last_message_text: latest?.text ?? '',
+                    last_message_sender_name: latest
+                        ? await this.senderNick(latest.sender_id)
+                        : '',
                     last_message_at: latest ? this.messageDate(latest) : null,
                 },
             });
@@ -856,7 +1430,19 @@ export class ChatService {
             conversationId,
             actor,
         );
+        if (
+            this.isGroup(conversation) &&
+            conversation.participants.length > 1 &&
+            this.roleOf(conversation, actor.id) !== 'admin'
+        ) {
+            throw new ForbiddenException(
+                'Only administrators can delete the group',
+            );
+        }
         const participantIds = this.participantIds(conversation);
+        if (conversation.photo) {
+            await this.files.remove(conversation.photo);
+        }
         const otherId = participantIds.find((id) => id !== actor.id);
         const other = otherId
             ? await this.users
