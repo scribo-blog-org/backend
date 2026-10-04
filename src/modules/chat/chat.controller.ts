@@ -117,10 +117,7 @@ export class ChatController {
 
     @OptionalAuth()
     @Get('conversations/:id/invite')
-    async groupInvite(
-        @Param('id') id: string,
-        @CurrentUser() actor?: Actor,
-    ) {
+    async groupInvite(@Param('id') id: string, @CurrentUser() actor?: Actor) {
         const data = await this.chat.getGroupInvite(id, actor);
         return { status: true, message: 'Group invite fetched', data };
     }

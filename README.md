@@ -1,57 +1,79 @@
-# Scribo API
+# Scribo backend
 
-HTTP API блога. Аккаунты, посты, комментарии, поиск, переписка, поддержка и админские данные. Реалтайм этот процесс не держит: события он публикует в Redis, а браузеру их отдаёт сервис `socket`.
+The HTTP API of the Scribo blog. Accounts, posts, comments, search, conversations, support tickets, admin data and backups. It owns every piece of persistent state in the system. It does not hold WebSocket connections: realtime events are published to Redis and delivered to browsers by the `socket` service.
 
-Прод: `https://scribo-blog.duckdns.org/api`. Рядом в том же хосте живут фронт и сокет; как nginx их разделяет, описано в репозитории `infra`.
+Production: `https://scribo.pp.ua/api`. Staging: `https://scribo-stage.pp.ua/api`. The frontend and the socket service answer on the same hosts; how nginx splits them is described in the `infra` repository.
 
-## Место в системе
+## Repositories
+
+| Repository | Role |
+| --- | --- |
+| `backend` | this repository |
+| `frontend` | Next.js client |
+| `socket` | WebSocket delivery for chat, typing and presence |
+| `infra` | compose files, nginx, certificates, server scripts |
+
+## Where it sits
 
 ```
-браузер  --HTTPS /api-->  nginx  -->  этот процесс :3001
-                                      ├─ MongoDB Atlas
-                                      ├─ файлы на диске (UPLOADS_DIR)
-                                      ├─ почта
-                                      └─ Redis publish scribo:events
+browser  --HTTPS /api-->  nginx  -->  this process :3001
+                                      |- MongoDB
+                                      |- uploads on disk (UPLOADS_DIR)
+                                      |- mail
+                                      `- Redis publish scribo:events
 ```
 
-Порт 3001 снаружи машины не открыт. Клиент ходит на публичный хост, nginx срезает префикс пути и проксирует его сюда как есть: `/api/posts` на входе nginx остаётся `/api/posts` у Nest.
+Port 3001 is not exposed outside the machine. Clients talk to the public host; nginx proxies the path through unchanged, so `/api/posts` at the edge is still `/api/posts` here.
 
-Старт печатает три строки и больше ничего штатного: Mongo подключена, каталог загрузок готов, порт слушается. Карту маршрутов Nest в лог не пишет. Ошибки и предупреждения остаются.
+Startup prints three lines and nothing else under normal operation: Mongo connected, uploads directory ready, port listening. The Nest route table is not logged. Errors and warnings still are.
 
-## Стек
+## How it talks to the rest of the system
 
-| Слой | Выбор |
+The browser gets an access JWT from this service and sends it as `Authorization: Bearer`. The `socket` service verifies the same token with the RS256 **public** key; it never receives the private key or the refresh secret, and it exits at startup if either is present in its environment.
+
+Writes always come here over HTTP. After a write that someone should hear about — a new chat message, a read receipt, a group change — this service publishes `{ room, event, payload }` to the Redis channel `scribo:events`. The socket service fans it out to the sockets subscribed to `user:<id>` or `chat:<id>`. The two services share a MongoDB: the socket reads conversation membership from it so that a client cannot subscribe to a chat it does not belong to.
+
+Uploaded images are written to a directory on disk and referenced in the database by path only, never by absolute URL. In production nginx serves that directory directly and read-only.
+
+## Stack
+
+| Layer | Choice |
 | --- | --- |
 | Runtime | Node.js 22 |
-| Framework | NestJS 11, адаптер Express |
-| База | MongoDB, Mongoose |
-| Доступ | RS256. Access JWT в `Authorization: Bearer`. Refresh — отдельный секрет, httpOnly cookie `refresh_token` |
-| Файлы | Локальный диск, отдаются backend по `/api/uploads/...` |
-| Почта | Nodemailer, Gmail |
-| События | Redis, канал `scribo:events` |
-| Контракт | OpenAPI 3, Swagger |
+| Framework | NestJS 11 on the Express adapter |
+| Database | MongoDB with Mongoose |
+| Auth | RS256. Access JWT in `Authorization: Bearer`; refresh signed with a separate secret and held in the httpOnly `refresh_token` cookie |
+| Files | local disk, served at `/uploads/...` |
+| Mail | Nodemailer over Gmail |
+| Events | Redis, channel `scribo:events` |
+| Contract | OpenAPI 3 with Swagger |
 
-Каждый JSON-ответ в конверте `{ status, message, data }`. Ошибки валидации и домена имеют ту же форму.
+Every JSON response is wrapped in `{ status, message, data }`. Validation and domain errors use the same envelope.
 
-## Что делает API
+## What the API does
 
-Регистрация и вход по почте и через Google. Коды подтверждения почты, сброс пароля, список сессий, refresh и выход. Google-логин принимает access token Google и сам ходит в userinfo. Client id живёт на фронте.
+**Accounts.** Registration and sign-in by e-mail or through Google, e-mail confirmation codes, password reset, session list, refresh and sign-out. The Google flow accepts a Google access token and calls userinfo itself; the client id lives in the frontend.
 
-Профили, подписки, сохранённые посты. Посты: создание и правка, категории, хештеги, обложка, счётчик просмотров при открытии статьи. Вложенные комментарии. Поиск по постам и комментариям, подсказки хештегов. Превью ссылок. Тикеты поддержки.
+**Content.** Profiles, follows, saved posts. Posts with categories, hashtags, a cover image and a view counter that increments when an article is opened. Nested comments. Search over posts and comments with hashtag suggestions. Link previews. Support tickets.
 
-Переписка хранится здесь. Новое сообщение и прочтение пишутся в Mongo и публикуются в Redis. Сокет только доставляет событие в комнату `chat:<id>` или `user:<id>`.
+**Conversations.** Both direct conversations and group chats are stored here. A group has a title, a description, a photo, a member list and per-member roles (`admin` or `member`). Group endpoints cover creation, editing, adding and removing members, promoting and demoting admins, leaving, and a public invite that lets a signed-in non-member look at the group and join it:
 
-Админка: пользователи и роли, категории, журнал действий, сводка аналитики. Роли: `user`, `author`, `moderator`, `admin`, `tech_admin`.
+```
+GET    /api/chat/conversations/:id/invite    public, title/photo/member count
+POST   /api/chat/conversations/:id/join      join an existing group
+```
 
-Маршруты по умолчанию требуют access JWT. Публичные помечены `@Public()`. `@OptionalAuth()` отдаёт страницу гостю и всё равно прикладывает пользователя, если токен есть. Так устроен просмотр статьи.
+Messages, read receipts, edits and deletions are written to Mongo and then published to Redis; the socket service only delivers them. Typing indicators never reach this service at all — they are socket-to-socket through Redis, because they are not state worth persisting.
 
-На чувствительных маршрутах стоит лимит. Лимит просмотра не отвечает 429: просмотр просто не увеличивается.
+**Administration.** Users and roles, categories, an action journal, an analytics summary and the backup console. Roles are `user`, `author`, `moderator`, `admin` and `tech_admin`.
 
-## Требования
+Routes require an access JWT by default. Public ones are marked `@Public()`. `@OptionalAuth()` serves a page to a guest but still attaches the user when a token is present; that is how article pages work. Sensitive routes are rate limited. The view counter is an exception: exceeding its limit does not return 429, the view simply is not counted.
 
-Node.js 22. MongoDB, Atlas или локальная. Для загрузок — каталог на диске. Для писем — пароль приложения Gmail. Для событий — Redis. На проде Redis поднимает compose из `infra`.
+## Requirements
 
-## Локальный запуск
+Node.js 22. MongoDB, either Atlas or local. A writable directory for uploads. A Gmail app password for mail. Redis for events — in production it is started by the compose stack in `infra`.
+
+## Running locally
 
 ```bash
 cp .env.example .env
@@ -59,116 +81,120 @@ npm install
 npm run start:dev
 ```
 
-Слушает `http://localhost:3001`.
+Listens on `http://localhost:3001`.
 
-| Проверка | URL |
+| Check | URL |
 | --- | --- |
-| Health, без префикса `/api` | `GET /health` |
+| Health, outside the `/api` prefix | `GET /health` |
 | Ping | `GET /api` |
-| OpenAPI в конверте приложения | `GET /api/docs` |
+| OpenAPI in the application envelope | `GET /api/docs` |
 | Swagger UI | `GET /api/swagger` |
-| Сырой OpenAPI | `GET /api/docs-json` |
+| Raw OpenAPI | `GET /api/docs-json` |
 
-`FRONTEND_ORIGIN` должен совпадать с origin фронта. Локально это обычно `http://localhost:3000`. В проде — `https://scribo-blog.duckdns.org`. CORS пускает этот origin. В не-production дополнительно пускает localhost.
+`FRONTEND_ORIGIN` must match the origin of the frontend exactly — `http://localhost:3000` locally, the public host in production. CORS admits that origin; outside production it additionally admits localhost.
 
-## Окружение
+## Environment
 
-Файл `.env` не коммитится. Образец — `.env.example`.
+`.env` is not committed. See `.env.example`.
 
-| Переменная | Обязательна | Смысл |
+| Variable | Required | Meaning |
 | --- | --- | --- |
-| `PORT` | нет | По умолчанию `3001` |
-| `MONGODB_URI` | да* | Полная строка. Если задана, части `DB_*` не используются |
-| `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_NAME` | да* | Когда `MONGODB_URI` пустой. `DB_HOST` — только хост кластера |
-| `JWT_PRIVATE_KEY` | да | Закрытый ключ RS256, PEM. Им подписывается access token |
-| `JWT_PUBLIC_KEY` | да | Открытый ключ RS256. Им API проверяет access token. Тот же ключ получает socket |
-| `JWT_REFRESH_KEY` | да | Отдельный секрет refresh. Без него refresh не подписывается |
-| `PASSWORD_SALT` | нет | Раунды bcrypt, по умолчанию `10` |
-| `FRONTEND_ORIGIN` | да в проде | CORS и ссылки в письмах, без слэша на конце |
-| `API_ORIGIN` | нет | Публичный origin в OpenAPI |
-| `MAIL_SENDER`, `MAIL_PASSWORD` | для почты | Ящик Gmail и пароль приложения |
-| `UPLOADS_DIR` | нет | Каталог загрузок, по умолчанию `./uploads`. В Docker это `/app/uploads`, папка окружения на хосте |
-| `UPLOADS_PUBLIC_URL` | нет | Публичный адрес каталога для логов, по умолчанию `<API_ORIGIN>/uploads`. В базе домен не хранится |
-| `SERVE_UPLOADS` | нет | `true`/`false`: отдавать ли `/uploads` из Node. По умолчанию включено вне production |
-| `BACKUP_ENABLED` | нет | `true` включает бекапы (расписание и кнопка в админке), по умолчанию выключены |
-| `BACKUPS_DIR` | нет | Каталог архивов, по умолчанию `./backups`. В Docker это `/app/backups`, папка окружения на хосте |
-| `BACKUP_AT` | нет | Время ежедневного запуска по UTC, по умолчанию `04:15` |
-| `BACKUP_KEEP_DAILY_DAYS` | нет | Сколько суток хранить по одному бекапу в день, по умолчанию `7` |
-| `BACKUP_KEEP_MONTHS` | нет | За сколько месяцев хранить последний бекап месяца, по умолчанию `12` |
-| `BACKUP_KEEP_UPLOADED` | нет | Сколько загруженных вручную архивов хранить, по умолчанию `3` |
-| `BACKUP_UPLOAD_MAX_MB` | нет | Самый большой загружаемый архив в МБ, по умолчанию `2048`. Лимит nginx для этого маршрута 4 ГБ |
-| `MONGODUMP_BIN`, `TAR_BIN` | нет | Пути к `mongodump` и `tar`, по умолчанию берутся из PATH |
-| `REDIS_URL` | да | С хоста `redis://127.0.0.1:6379`. В compose `redis://redis:6379` |
+| `PORT` | no | `3001` by default |
+| `MONGODB_URI` | yes* | Full connection string. When set, the `DB_*` parts are ignored |
+| `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_NAME` | yes* | Used when `MONGODB_URI` is empty. `DB_HOST` is the cluster host only |
+| `JWT_PRIVATE_KEY` | yes | RS256 private key, PEM. Signs access tokens |
+| `JWT_PUBLIC_KEY` | yes | RS256 public key. Verifies access tokens here and in the socket service |
+| `JWT_REFRESH_KEY` | yes | Separate refresh secret |
+| `PASSWORD_SALT` | no | bcrypt rounds, `10` by default |
+| `FRONTEND_ORIGIN` | in production | CORS origin and the base of links in e-mails, no trailing slash |
+| `API_ORIGIN` | no | Public origin advertised in OpenAPI |
+| `MAIL_SENDER`, `MAIL_PASSWORD` | for mail | Gmail account and app password |
+| `UPLOADS_DIR` | no | Uploads directory, `./uploads` by default. `/app/uploads` in Docker, bind-mounted from the host |
+| `UPLOADS_PUBLIC_URL` | no | Public address of that directory for logs, `<API_ORIGIN>/uploads` by default. The domain is never stored in the database |
+| `SERVE_UPLOADS` | no | Whether Node serves `/uploads` itself. Enabled outside production by default |
+| `BACKUP_ENABLED` | no | Enables the schedule and the admin button. Off by default |
+| `BACKUP_RESTORE_ENABLED` | no | Enables restore and archive upload. Off by default |
+| `BACKUPS_DIR` | no | Archive directory, `./backups` by default, `/app/backups` in Docker |
+| `BACKUP_AT` | no | Daily run time in UTC, `04:15` by default |
+| `BACKUP_KEEP_DAILY_DAYS` | no | Days kept at one backup per day, `7` by default |
+| `BACKUP_KEEP_MONTHS` | no | Months kept at one backup per month, `12` by default |
+| `BACKUP_KEEP_UPLOADED` | no | How many manually uploaded archives are kept, `3` by default |
+| `BACKUP_UPLOAD_MAX_MB` | no | Largest uploadable archive in MB, `2048` by default. The nginx limit for that route is 4 GB |
+| `MONGODUMP_BIN`, `TAR_BIN` | no | Paths to `mongodump` and `tar`, taken from `PATH` by default |
+| `REDIS_URL` | yes | `redis://127.0.0.1:6379` from the host, `redis://redis:6379` inside compose |
 
-\* Либо `MONGODB_URI`, либо все четыре `DB_*`.
+\* Either `MONGODB_URI`, or all four `DB_*` values.
 
-## Файлы
+## Files
 
-Работа с файлами вынесена в слой `src/files`, как база в `src/database`. Сервисы приложения зовут только `FilesService.saveImage(...)` и `FilesService.remove(url)`; где и как файлы лежат, знает только этот слой (`FilesDisk` пишет на диск, `files.config.ts` считает пути и ссылки).
+File handling is isolated in `src/files`, the same way the database is isolated in `src/database`. Application services only call `FilesService.saveImage(...)` and `FilesService.remove(url)`; where the bytes actually live is known to that layer alone (`FilesDisk` writes to disk, `files.config.ts` computes paths and public URLs).
 
-Аватары и картинки постов лежат в `UPLOADS_DIR/src/avatar` и `UPLOADS_DIR/src/featured_image` (файлы 644, каталоги 755). В базе хранится путь `/uploads/src/...` без домена. Полную ссылку собирает клиент: origin окружения (`NEXT_PUBLIC_APP_API_URL`, в проде тот же хост, что отдаёт nginx) плюс этот путь.
+Images are stored under `UPLOADS_DIR/src/<kind>/<id>.<ext>`, where the kind is `avatar`, `featured_image` or `group`. Files are mode 644, directories 755, and intermediate directories are created on first write — adding a new kind requires no manual setup on the server. The database stores the path `/uploads/src/...` without a domain; the client prefixes the origin of its own environment.
 
-В проде каталог отдаёт nginx из стека edge, напрямую с тома и только на чтение: Node картинки не читает и не гонит. В dev, без nginx, их отдаёт сам backend (`SERVE_UPLOADS`, по умолчанию включено вне `NODE_ENV=production`). Старые ссылки на S3 остаются в базе и открываются как раньше, но при удалении поста или смене аватара такие файлы не удаляются. `backend/uploads` в git не попадает.
+In production the directory is served by the nginx container of the `edge` stack, straight from the bind mount and read-only, so Node never streams an image. In development, with no nginx in front, the backend serves it itself (`SERVE_UPLOADS`, on by default outside `NODE_ENV=production`). Legacy S3 URLs still in the database keep working, but such files are not deleted when a post or avatar changes. `backend/uploads` is not tracked in git.
 
-## Бекапы
+## Backups
 
-Модуль `src/modules/backups`. Бекап — один файл `scribo-ГГГГММДД-ЧЧММСС.tar` (время по UTC) в `BACKUPS_DIR`, внутри:
+Implemented in `src/modules/backups`. A backup is a single file `scribo-YYYYMMDD-HHMMSS.tar` (UTC) in `BACKUPS_DIR` containing:
 
 ```
-manifest.json         паспорт: связывает базу и загрузки, нужен для отката
-mongo.archive.gz      дамп Mongo (mongodump --gzip --archive)
-uploads/              каталог загрузок целиком (UPLOADS_DIR)
+manifest.json         ties the database dump and the uploads together; required for restore
+mongo.archive.gz      mongodump --gzip --archive
+uploads/              the entire uploads directory
 ```
 
-Запускается ежедневно в `BACKUP_AT` (UTC) и по кнопке на вкладке «Бекапы» админки. Вкладка и API (`/api/backups`) доступны только роли `tech_admin`: в архиве хэши паролей и вся переписка.
+It runs daily at `BACKUP_AT` (UTC) and on demand from the Backups tab of the admin panel. The tab and `/api/backups` are restricted to `tech_admin`, because the archive contains password hashes and every conversation.
 
-**Каждый запуск это отдельный файл.** Ручной бекап ничего не заменяет, а добавляется к сегодняшним. Архив собирается во временный файл и появляется целиком, поэтому упавший запуск ничего не портит.
+**Every run is its own file.** A manual backup does not replace anything, it is added to today's set. The archive is assembled in a temporary file and appears whole, so a failed run cannot leave a half-written backup behind.
 
-**Хранение.** После каждого успешного бекапа лишнее удаляется по правилам (все считаются по дням UTC):
+**Retention.** After each successful backup the surplus is deleted, counted in UTC days:
 
-| Что | Сколько остаётся |
+| Age | What is kept |
 | --- | --- |
-| Сегодня | все бекапы, в том числе ручные |
-| Прошлые `BACKUP_KEEP_DAILY_DAYS` суток (7) | по одному на день, последний за этот день |
-| Старше, до `BACKUP_KEEP_MONTHS` месяцев (12) | по одному на месяц: последний бекап месяца, то есть последнего дня |
+| Today | everything, including manual runs |
+| The previous `BACKUP_KEEP_DAILY_DAYS` days (7) | one per day, the last one of that day |
+| Older, up to `BACKUP_KEEP_MONTHS` months (12) | one per month, the last backup of that month |
 
-«Последний» считается по всей истории, включая уже удалённые бекапы, поэтому роль не переходит к предпоследнему. Если в последний день месяца бекапа не было, остаётся последний бекап этого месяца. Записи в истории остаются, у удалённого файла пропадают кнопки «Скачать» и «Восстановить».
+"Last" is computed over the whole history including already deleted entries, so the role never slides to the second-to-last backup. History rows remain; a deleted file simply loses its Download and Restore buttons.
 
-Каждый запуск пишет запись в коллекцию `backups`: время, тип (`schedule` или `manual`), статус (`running`, `success`, `failed`), размер, ошибка и кто запустил. Одновременно идёт один бекап или откат. Записи `running`, оставшиеся после падения процесса, при старте помечаются `failed`, а недособранные временные файлы удаляются.
+Each run writes a row into the `backups` collection: time, kind (`schedule` or `manual`), status (`running`, `success`, `failed`), size, error and who started it. Only one backup or restore runs at a time. `running` rows left behind by a crashed process are marked `failed` at startup and their temporary files are removed.
 
-Строка подключения передаётся `mongodump` через временный файл 0600, а не аргументом, поэтому пароля нет ни в списке процессов, ни в ошибках в истории. Во время сборки архива рядом с готовыми файлами лежит временный дамп Mongo, так что на диске нужен запас примерно на один лишний бекап.
+The connection string is handed to `mongodump` through a 0600 temporary file rather than an argument, so the password appears neither in the process list nor in stored error text. While an archive is being assembled a temporary dump sits next to the finished files, so the disk needs headroom for roughly one extra backup.
 
-### Откат на бекап
+### Restore
 
-Кнопка «Восстановить» у бекапа ставит его базу и загрузки поверх текущих. Включается отдельно: `BACKUP_RESTORE_ENABLED=true` рядом с `BACKUP_ENABLED=true` (по умолчанию выключено). Право `restore_backups` только у `tech_admin`; API: `POST /api/backups/:id/restore` с телом `{ "confirm": true }`. Статус отката приходит в `GET /api/backups` (`status.restoring`, `status.restore_job`, `status.current`, `status.last_restore`).
+The Restore button installs a backup's database and uploads over the current ones. It is enabled separately: `BACKUP_RESTORE_ENABLED=true` alongside `BACKUP_ENABLED=true`, off by default. The `restore_backups` permission belongs to `tech_admin` only. The endpoint is `POST /api/backups/:id/restore` with `{ "confirm": true }`, and progress is reported through `GET /api/backups` (`status.restoring`, `status.restore_job`, `status.current`, `status.last_restore`).
 
-**Манифест.** Внутри каждого архива лежит `manifest.json`: id бекапа, время, имя базы, список коллекций, sha256 и размер дампа, число файлов и размер загрузок, версия приложения и `based_on`, то есть на каком бекапе стояла система, когда сняли этот. Он связывает базу и хранилище в одно целое и по нему проверяется архив перед откатом. Архивы, снятые до манифеста, откатом не ставятся.
+**The manifest.** Every archive carries `manifest.json`: backup id, time, database name, collection list, sha256 and size of the dump, file count and byte size of the uploads, the application version, and `based_on` — which backup the system was running when this one was taken. It binds the database and the file storage into one unit and is what the archive is validated against. Archives taken before the manifest existed cannot be restored.
 
-**Порядок отката:**
-1. Архив распаковывается и проверяется: манифест, совпадение имени базы, контрольная сумма дампа, число файлов. Если что-то не так, ничего не тронуто.
-2. Снимается страховочный снимок текущего состояния `scribo-pre-restore-….tar`. Он не подпадает под правило «один файл на день». Снимок хранится один (`BACKUP_KEEP_PRE_RESTORE`, по умолчанию 1): старые от прошлых откатов удаляются сразу, как только снят новый. После успешного отката снимок удаляется, запись о нём в истории остаётся. После неудачного остаётся, по нему восстанавливают вручную.
-3. `mongorestore --drop` базы, затем удаляются коллекции, которых в бекапе нет. Историю бекапов (`backups`) откат не трогает: она исключена из восстановления.
-4. Каталог загрузок очищается и заполняется из архива.
-5. Если шаги 3–4 упали, система сама возвращается к страховочному снимку.
+**Order of operations:**
 
-Пока идёт откат, backend отвечает 503 на любые запросы, меняющие данные (кроме `/api/backups`), чтение работает. Перезапускать backend не нужно. Сессии откатываются вместе с базой, поэтому часть пользователей войдёт заново.
+1. The archive is unpacked and verified: manifest, database name, dump checksum, file count. If anything fails, nothing has been touched.
+2. A safety snapshot of the current state is taken as `scribo-pre-restore-….tar`. It is exempt from the one-per-day rule and only one is kept (`BACKUP_KEEP_PRE_RESTORE`, default 1): older ones are deleted as soon as a new one exists. After a successful restore the snapshot is deleted and its history row remains; after a failed one it is kept for manual recovery.
+3. `mongorestore --drop`, then collections absent from the backup are dropped. The `backups` history itself is excluded from restore.
+4. The uploads directory is emptied and refilled from the archive.
+5. If steps 3 or 4 fail, the system rolls itself back to the safety snapshot.
 
-**Загрузка своего архива.** Кнопка «Загрузить бекап» принимает `.tar`, снятый Scribo (скачанный из админки, с другого окружения или с диска): `POST /api/backups/upload`, multipart, поле `file`, права `manage_backups` и `restore_backups`, работает только при `BACKUP_RESTORE_ENABLED=true`. Файл не ставится сразу: он проверяется и попадает в список как «Загружен вручную», а устанавливается обычной кнопкой «Восстановить» с подтверждением и страховочным снимком. Архиву не доверяем, поэтому проверка идёт до распаковки и после неё:
-- по заголовкам tar, без распаковки: только обычные файлы и каталоги (ссылки, устройства и подобное отвергаются), пути без `..` и абсолютных, в архиве ровно `manifest.json`, `mongo.archive.gz` и каталог загрузок из манифеста, без повторов; число файлов и размеры совпадают с манифестом, размер распакованного ограничен;
-- манифест правильной формы, версия данных равна текущей (имя базы не важно);
-- после распаковки: размер и sha256 дампа, число файлов и байт в загрузках;
-- сам дамп: целый gzip-поток в формате `mongodump --archive`.
-Повтор архива, который уже есть в списке, отвергается. Хранятся последние `BACKUP_KEEP_UPLOADED` загруженных архивов, остальные удаляет ротация. Во время проверки занята та же блокировка, что у бекапа и отката. За nginx маршрут загрузки вынесен отдельно (лимит тела 4 ГБ, без буферизации, таймаут 15 минут). В журнале: `backup_upload` и `backup_upload_failed`.
+While a restore is running the backend answers 503 to every mutating request except `/api/backups`; reads keep working and no restart is needed. Sessions are restored along with the database, so some users will have to sign in again.
 
-**Где хранится «на каком я бекапе».** В `state.json` рядом с архивами, а не в базе: база при откате заменяется целиком. Там же последние откаты. Замок `restore.lock` существует только пока откат идёт: если он остался после падения процесса, при старте откат помечается прерванным, и админка предлагает восстановить страховочный снимок.
+**Uploading an archive.** The Upload backup button accepts a `.tar` produced by Scribo — downloaded from this admin panel, from another environment, or from disk: `POST /api/backups/upload`, multipart, field `file`, permissions `manage_backups` and `restore_backups`, only while `BACKUP_RESTORE_ENABLED=true`. It is not installed on arrival: it is validated, listed as "uploaded manually", and installed later through the usual Restore button with confirmation and a safety snapshot. An uploaded archive is untrusted, so it is checked before and after unpacking:
 
-Имя базы на откат не влияет: бекап ставится в ту базу, к которой подключён backend, переименованием на лету (`mongorestore --nsFrom=<база из архива>.$col$ --nsTo=<текущая>.$col$`). Поэтому архив со стейджа (база `dev`) ставится в локальную или в прод без правок `.env`. Совместимость определяет версия данных.
+- from the tar headers, without unpacking: regular files and directories only (links, devices and the like are rejected), no absolute or `..` paths, exactly `manifest.json`, `mongo.archive.gz` and the uploads directory named in the manifest, no duplicates, file count and sizes matching the manifest, bounded uncompressed size;
+- a well-formed manifest whose data version equals the current one (the database name does not matter);
+- after unpacking: dump size and sha256, upload file count and byte count;
+- the dump itself: a complete gzip stream in `mongodump --archive` format.
 
-**Версия данных.** Это мажор и минор версии backend из `package.json`: `6.1.2` даёт `6.1`. Вручную её поднимать не нужно, она следует за `version`. Исправления (`6.1.1` → `6.1.2`) формат данных не меняют, новая функция поднимает минор (`6.1` → `6.2`) и делает бекапы прежнего минора несовместимыми. Откат и загрузка разрешены только при совпадении версий данных. Backend при каждом запуске пишет в базу, в коллекцию `app_meta` (документ `_id: "db"`), версию данных и полную версию приложения и отмечает смену в журнале (`db_version_sync`). Эту запись возвращает и откат: после установки бекапа она снова приводится к версии работающего backend. В манифест и в историю каждого бекапа пишутся `db.version`, `app_version`; у старых архивов версия данных берётся из `app_version`. Правило совпадения лежит в `incompatibility()` (`db-version.ts`).
+Re-uploading an archive that is already listed is rejected. The last `BACKUP_KEEP_UPLOADED` uploads are kept. Validation holds the same lock as backup and restore. Behind nginx the upload route has its own location with a 4 GB body limit, buffering disabled and a 15 minute timeout. The journal records `backup_upload` and `backup_upload_failed`.
 
-`BACKUP_ENABLED=false` отключает всё: расписание не стартует, ручной запуск отвечает 409. На стейдже ставим `false`.
+**Where "which backup am I on" lives.** In `state.json` next to the archives, not in the database, because the database is replaced wholesale during a restore. Recent restores are recorded there too. `restore.lock` exists only while a restore is in progress; if it survives a crash, the restore is marked interrupted at startup and the admin panel offers the safety snapshot.
 
-Восстановление ручное. Распаковать архив, затем:
+The database name does not constrain a restore: the backup is installed into whichever database the backend is connected to, renamed on the fly (`mongorestore --nsFrom=<name in archive>.$col$ --nsTo=<current>.$col$`). A staging archive therefore installs into a local or production database without editing `.env`. Compatibility is decided by the data version instead.
+
+**Data version.** The major and minor of the backend version in `package.json`: `6.1.2` yields `6.1`. It is never bumped by hand, it follows `version`. A patch release does not change the data format; a feature release raises the minor and makes archives of the previous minor incompatible. Restore and upload require an exact match. On every start the backend writes the data version and the full application version into the `app_meta` collection (document `_id: "db"`) and records any change in the journal (`db_version_sync`). A restore reapplies the same record afterwards, so it always reflects the running backend. `db.version` and `app_version` are written into every manifest and history row; for older archives the data version is derived from `app_version`. The comparison rule lives in `incompatibility()` in `db-version.ts`.
+
+`BACKUP_ENABLED=false` disables everything: the schedule does not start and manual runs answer 409. Staging runs with `false`.
+
+Manual recovery, if the admin panel is unavailable:
 
 ```bash
 tar -xf scribo-2026-10-02.tar
@@ -176,31 +202,27 @@ mongorestore --gzip --archive=mongo.archive.gz --uri="$MONGODB_URI" --drop
 cp -a uploads/. /srv/scribo/prod/uploads/
 ```
 
-В образе `mongodump` и GNU `tar` ставятся пакетами Alpine `mongodb-tools` и `tar`. Локально нужны установленные `mongodump` и `tar`.
+The image installs `mongodump` and GNU `tar` from the Alpine packages `mongodb-tools` and `tar`. Locally both must be on `PATH`.
 
-## Локальная Mongo в Docker
+## Local MongoDB in Docker
 
-Из `infra/local` в репозитории infra: `docker compose up -d --build` поднимает всё (Mongo, Redis, backend, socket, frontend), `docker compose down` останавливает, `docker compose up -d redis mongo` поднимает только Redis и Mongo. Данные Mongo стирает `docker compose down -v`.
+From `infra/local` in the infra repository: `docker compose up -d --build` brings up everything (Mongo, Redis, backend, socket, frontend), `docker compose down` stops it, `docker compose up -d redis mongo` starts only the datastores. `docker compose down -v` erases the Mongo volume.
 
-Приложения можно запускать и вручную, а в Docker держать только Mongo и Redis:
-
-Из каталога репозитория infra:
+To run the applications by hand with only the datastores in Docker:
 
 ```bash
 cd infra/local && docker compose up -d mongo redis
 ```
 
-В `backend/.env` и `socket/.env` поставить:
+Then in `backend/.env` and `socket/.env`:
 
 ```
 MONGODB_URI=mongodb://scribo:scribo@127.0.0.1:27017/scribo?authSource=admin
 ```
 
-`MONGODB_URI` приоритетнее `DB_*`: чтобы вернуться на Atlas, закомментируйте эту строку. У socket дополнительно нужен `DB_NAME=scribo` (имя базы должно совпадать с backend). Данные живут в томе `scribo-mongo-data`; `docker compose down -v` стирает их. Смотреть данные: `docker exec -it scribo-mongo mongosh -u scribo -p scribo --authenticationDatabase admin scribo`.
+`MONGODB_URI` takes precedence over the `DB_*` values, so returning to Atlas is a matter of commenting that line out. The socket service additionally needs `DB_NAME=scribo`; the database name must match the backend. Data lives in the `scribo-mongo-data` volume. To inspect it: `docker exec -it scribo-mongo mongosh -u scribo -p scribo --authenticationDatabase admin scribo`.
 
-Закрытый ключ и секрет refresh на сокет не передаются. Сокет умеет только проверять access token открытым ключом.
-
-## Скрипты
+## Scripts
 
 ```bash
 npm run start:dev
@@ -214,45 +236,49 @@ npm run test:e2e
 npm run test:cov
 ```
 
-## Как устроен код
+## Layout
 
 ```
 src/
-  main.ts              старт, проверка Mongo и каталога загрузок, порт
-  create-app.ts        CORS, cookie, валидация, Swagger
+  main.ts              startup, Mongo and uploads checks, port
+  create-app.ts        CORS, cookies, validation, static uploads, Swagger
   app.module.ts
-  authz/               guard JWT, роли, права
-  http/                конверт ответа, ошибки, лимиты
-  visitor/             IP, гео, устройство
-  validation/          лимиты полей и DTO
-  infra/               почта, локальное хранилище, журнал в Mongo, проверки старта
-  config/              env, URI Mongo, ключи JWT
-  database/            Mongoose и схемы
-  socket/              публикация событий в Redis
+  authz/               JWT guard, roles, permissions
+  http/                response envelope, errors, rate limits
+  visitor/             IP, geo, device
+  validation/          field limits and DTOs
+  infra/               mail, logger into Mongo, startup checks
+  config/              environment, Mongo URI, JWT keys
+  database/            Mongoose connection and schemas
+  files/               uploads: service, disk, config, interceptors
+  socket/              event publishing into Redis
   modules/
-    auth/              регистрация, вход, сессии, сброс
-    users/             пользователи и роли
+    auth/              registration, sign-in, sessions, reset
+    users/             users and roles
     profile/
     categories/
-    posts/             посты и комментарии
+    posts/             posts and comments
     search/
     support/
     logs/
     analytics/
     notifications/
-    chat/
+    chat/              direct conversations, groups, messages
+    backups/
     link-preview/
 ```
 
-## Сессия для клиента
+## Client session flow
 
-1. Вход и регистрация возвращают `accessToken` в `data` и ставят cookie `refresh_token`.
-2. Обычные запросы идут с `Authorization: Bearer <accessToken>`.
-3. `POST /api/auth/refresh` идёт с cookie, `credentials: include`.
-4. Google-вход присылает `googleToken`.
+1. Sign-in and registration return `accessToken` in `data` and set the `refresh_token` cookie.
+2. Normal requests carry `Authorization: Bearer <accessToken>`.
+3. `POST /api/auth/refresh` is sent with the cookie and `credentials: include`.
+4. Google sign-in posts `googleToken`.
 
-За reverse proxy включён `trust proxy`: Secure cookie и реальный IP клиента берутся из заголовков nginx.
+`trust proxy` is enabled behind the reverse proxy, so Secure cookies and the real client IP are taken from the nginx headers.
 
-## Выкладка
+## Deployment
 
-Push в `master` собирает образ `ghcr.io/scribo-blog-org/backend`, теги `latest` и sha, и по SSH поднимает сервис `backend` в `/opt/scribo`. Pull request в `master` гоняет lint, test и `docker build` без публикации. Подробности машины — в `infra`.
+A push to `master` builds `ghcr.io/scribo-blog-org/backend` on an ARM runner, publishes the `latest` and commit-sha tags and restarts the `backend` service of the `prod` stack over SSH. A push to `dev` does the same with the `staging` tag against the `stage` stack. Pull requests run lint, test and a local `docker build` without publishing.
+
+The machine, nginx, Redis and the compose layout are documented in the `infra` repository.
