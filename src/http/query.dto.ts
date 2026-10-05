@@ -115,6 +115,28 @@ export class ListUsersQueryDto {
     is_admin?: string;
 }
 
+export class AdminListUsersQueryDto extends PaginationQueryDto {
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsString()
+    @MaxLength(100)
+    search?: string;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsString()
+    @IsIn(['activity', 'registered'])
+    sort?: string;
+
+    @ApiPropertyOptional({
+        description: 'Comma separated roles, or "staff" for everyone but users',
+    })
+    @IsOptional()
+    @IsString()
+    @MaxLength(100)
+    roles?: string;
+}
+
 export class ListLogsQueryDto extends PaginationQueryDto {
     @ApiPropertyOptional()
     @IsOptional()

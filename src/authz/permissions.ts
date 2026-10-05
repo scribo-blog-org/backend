@@ -7,6 +7,7 @@ export const PERMISSIONS = {
     DELETE_ANY_CATEGORY: 'delete_any_category',
     DELETE_ANY_COMMENT: 'delete_any_comment',
     MANAGE_ROLES: 'manage_roles',
+    MANAGE_VERIFICATION: 'manage_verification',
     VIEW_LOGS: 'view_logs',
     MANAGE_SUPPORT: 'manage_support',
     MANAGE_BACKUPS: 'manage_backups',
