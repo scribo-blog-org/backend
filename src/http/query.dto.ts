@@ -161,6 +161,11 @@ export class ListLogsQueryDto extends PaginationQueryDto {
     @ApiPropertyOptional()
     @IsOptional()
     @IsString()
+    role?: string;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsString()
     type?: string;
 }
 

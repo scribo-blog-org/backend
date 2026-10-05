@@ -55,6 +55,12 @@ export class LogsQueryService {
                 filter,
                 this.idMatch('data.support_request', query.support_request),
             );
+        if (query.role) {
+            filter.$or = [
+                { 'data.old_role': query.role },
+                { 'data.new_role': query.role },
+            ];
+        }
         if (query.type) filter.type = query.type;
         const total = await this.logs.countDocuments(filter);
         const items = await this.logs
