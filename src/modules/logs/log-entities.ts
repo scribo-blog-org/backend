@@ -8,6 +8,7 @@ export type LogEntity = {
     name: string;
     count: number;
     last: Date;
+    deleted: boolean;
 };
 
 export type EntityCollections = {
@@ -124,6 +125,36 @@ export function entitiesPipeline(options: {
             },
         },
         {
+            $addFields: {
+                deleted: {
+                    $eq: [
+                        {
+                            $size: {
+                                $switch: {
+                                    branches: [
+                                        {
+                                            case: {
+                                                $eq: ['$_id.type', 'user'],
+                                            },
+                                            then: '$liveUser',
+                                        },
+                                        {
+                                            case: {
+                                                $eq: ['$_id.type', 'post'],
+                                            },
+                                            then: '$livePost',
+                                        },
+                                    ],
+                                    default: '$liveCategory',
+                                },
+                            },
+                        },
+                        0,
+                    ],
+                },
+            },
+        },
+        {
             $match: {
                 name: regex ? { $regex: regex } : { $nin: [null, ''] },
             },
@@ -154,6 +185,7 @@ type GroupRow = {
     name: string;
     last: Date;
     count: number;
+    deleted: boolean;
 };
 
 export function toEntities(rows: GroupRow[]): LogEntity[] {
@@ -163,5 +195,6 @@ export function toEntities(rows: GroupRow[]): LogEntity[] {
         name: row.name,
         count: row.count,
         last: row.last,
+        deleted: row.deleted,
     }));
 }
