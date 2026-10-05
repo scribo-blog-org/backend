@@ -80,6 +80,7 @@ export class AuthController {
     }
 
     @Public()
+    @RateLimits({ name: 'register-email', windowMs: 15 * 60 * 1000, max: 10 })
     @Post('register/email')
     @ApiConsumes('multipart/form-data')
     @UseInterceptors(imageFileInterceptor('userAvatar'))
@@ -99,6 +100,7 @@ export class AuthController {
     }
 
     @Public()
+    @RateLimits({ name: 'register-google', windowMs: 15 * 60 * 1000, max: 10 })
     @Post('register/google')
     @ApiConsumes('multipart/form-data')
     @UseInterceptors(imageFileInterceptor('userAvatar'))
@@ -169,6 +171,7 @@ export class AuthController {
     }
 
     @Public()
+    @RateLimits({ name: 'login-username', windowMs: 15 * 60 * 1000, max: 10 })
     @Post('login/username')
     @ApiOperation({ summary: 'Login by email or nick name' })
     @ApiOkResponse({ type: AccessTokenDataDto })
@@ -193,6 +196,7 @@ export class AuthController {
     }
 
     @Public()
+    @RateLimits({ name: 'login-google', windowMs: 15 * 60 * 1000, max: 20 })
     @Post('login/google')
     @HttpCode(HttpStatus.OK)
     @ApiOperation({ summary: 'Login with Google access token' })

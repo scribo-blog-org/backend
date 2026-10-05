@@ -14,7 +14,7 @@ export type RateLimitRule = {
     name: string;
     windowMs: number;
     max: number;
-    by?: 'ip' | 'email';
+    by?: 'ip' | 'email' | 'user';
 };
 
 export const RATE_LIMITS_KEY = 'rate_limits';
@@ -70,7 +70,9 @@ export class RateLimitGuard implements CanActivate {
             ) ?? [];
         if (!rules.length) return true;
 
-        const req = context.switchToHttp().getRequest<Request>();
+        const req = context
+            .switchToHttp()
+            .getRequest<Request & { auth?: { id?: string } }>();
         const ip = clientIp(req) || 'unknown';
         const email = String(
             (req.body as { userEmail?: string } | undefined)?.userEmail || '',
@@ -78,11 +80,15 @@ export class RateLimitGuard implements CanActivate {
             .trim()
             .toLowerCase();
 
+        const userId = req.auth?.id ? String(req.auth.id) : '';
+
         for (const rule of rules) {
             const key =
                 rule.by === 'email'
                     ? `${rule.name}:email:${email || 'missing'}`
-                    : `${rule.name}:ip:${ip}`;
+                    : rule.by === 'user'
+                      ? `${rule.name}:user:${userId || ip}`
+                      : `${rule.name}:ip:${ip}`;
             if (!consume(key, rule.windowMs, rule.max)) {
                 throw new HttpException(
                     'Too many requests. Try again later.',
