@@ -13,18 +13,20 @@ import { Connection, Model } from 'mongoose';
 import type { Request } from 'express';
 import { PERMISSIONS } from '../../authz/permissions';
 import { hasPermission, type Actor } from '../../authz/policy';
-import { clientIp } from '../../visitor/geo';
+import { clientIp, lookupVisitorGeo } from '../../visitor/geo';
 import { AppLog } from '../../database/schemas/log.schema';
 import { Category } from '../../database/schemas/category.schema';
 import { Post } from '../../database/schemas/post.schema';
 import { PostComment } from '../../database/schemas/post-comment.schema';
 import { User } from '../../database/schemas/user.schema';
-import { SearchQueryLog } from '../../database/schemas/search-query.schema';
 import { Session } from '../../database/schemas/session.schema';
 import {
     VisitDay,
     VisitHour,
+    VisitPlace,
+    VisitUser,
 } from '../../database/schemas/visit-bucket.schema';
+import { RequestMetricsService } from './request-metrics.service';
 
 const DEDUPE_SECONDS = 8;
 const LEGACY_PAGEVIEWS = 'pageviews';
@@ -55,9 +57,12 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
         @InjectModel(Category.name)
         private readonly categories: Model<Category>,
         @InjectModel(AppLog.name) private readonly logs: Model<AppLog>,
-        @InjectModel(SearchQueryLog.name)
-        private readonly searchLogs: Model<SearchQueryLog>,
         @InjectModel(Session.name) private readonly sessions: Model<Session>,
+        @InjectModel(VisitPlace.name)
+        private readonly visitPlaces: Model<VisitPlace>,
+        @InjectModel(VisitUser.name)
+        private readonly visitUsers: Model<VisitUser>,
+        private readonly requestMetrics: RequestMetricsService,
     ) {
         this.redis = new Redis(config.getOrThrow<string>('REDIS_URL'), {
             maxRetriesPerRequest: 1,
@@ -237,7 +242,49 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
             ),
         ]);
 
+        void this.recordVisitDetails(bucketAt, actor, req);
+
         return { counted: true };
+    }
+
+    private async recordVisitDetails(
+        bucketAt: Date,
+        actor: Actor | undefined,
+        req: Request,
+    ) {
+        const hour = this.hourKey(bucketAt);
+        try {
+            const writes: Promise<unknown>[] = [];
+            if (actor?.id) {
+                writes.push(
+                    this.visitUsers.updateOne(
+                        { hour, user: actor.id },
+                        { $setOnInsert: { bucket_at: bucketAt } },
+                        { upsert: true },
+                    ),
+                );
+            }
+            const geo = await lookupVisitorGeo(req);
+            writes.push(
+                this.visitPlaces.updateOne(
+                    {
+                        hour,
+                        city: geo.city || '',
+                        country: geo.country || '',
+                    },
+                    {
+                        $inc: { count: 1 },
+                        $setOnInsert: { bucket_at: bucketAt },
+                    },
+                    { upsert: true },
+                ),
+            );
+            await Promise.all(writes);
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : 'visit details failed';
+            this.logger.warn(message);
+        }
     }
 
     private hourStart(date: Date) {
@@ -366,14 +413,17 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
             period.mode === 'hours'
                 ? this.hoursAgo(period.hours)
                 : this.rangeStart(period.days);
-        const previousFrom =
+        const firstHour = this.hourKey(
             period.mode === 'hours'
-                ? this.hoursAgo(period.hours * 2)
-                : this.rangeStart(period.days * 2);
+                ? new Date(
+                      this.hourStart(new Date()).getTime() -
+                          (period.hours - 1) * 60 * 60 * 1000,
+                  )
+                : this.rangeStart(period.days),
+        );
         const traffic = await this.trafficTotals(period);
-        const [searchInsights, contentTags, topPosts, activity] =
+        const [contentTags, topPosts, activity, places, uniqueUsers, timings] =
             await Promise.all([
-                this.searchInsights(from, previousFrom),
                 this.contentHashtags(5),
                 this.posts
                     .find({ views_count: { $gt: 0 } })
@@ -382,7 +432,16 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
                     .limit(5)
                     .lean(),
                 this.periodActivity(from),
+                this.placeActivity(firstHour),
+                this.uniqueSignedIn(firstHour),
+                this.requestMetrics.summary(
+                    firstHour,
+                    period.mode === 'hours' ? 13 : 10,
+                ),
             ]);
+
+        const totalVisits =
+            traffic.authorized_visits + traffic.anonymous_visits;
 
         return {
             days: period.key,
@@ -395,6 +454,24 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
             audience: {
                 authorized_visits: traffic.authorized_visits,
                 anonymous_visits: traffic.anonymous_visits,
+                authorized_share: totalVisits
+                    ? traffic.authorized_visits / totalVisits
+                    : 0,
+                unique_authorized: uniqueUsers,
+            },
+            places,
+            timings: {
+                ...timings.overall,
+                slowest: timings.slowest,
+                series: traffic.series.map((point) => {
+                    const date = String(point.date);
+                    const entry = timings.series.get(date);
+                    return {
+                        date,
+                        avg_ms: entry?.avg_ms ?? 0,
+                        db_ms: entry?.db_ms ?? 0,
+                    };
+                }),
             },
             top_posts: (
                 topPosts as Array<{
@@ -407,16 +484,71 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
                 title: post.title,
                 views_count: Number(post.views_count || 0),
             })),
-            top_queries: searchInsights.top_queries as Array<{
-                query: string;
-                count: number;
-            }>,
             top_hashtags: contentTags.top as Array<{
                 tag: string;
                 uses: number;
                 posts: number;
                 comments: number;
             }>,
+        };
+    }
+
+    private async uniqueSignedIn(firstHour: string) {
+        const rows = await this.visitUsers.aggregate<{ n: number }>([
+            { $match: { hour: { $gte: firstHour } } },
+            { $group: { _id: '$user' } },
+            { $count: 'n' },
+        ]);
+        return rows[0]?.n ?? 0;
+    }
+
+    private async placeActivity(firstHour: string) {
+        const rows = await this.visitPlaces.aggregate<{
+            _id: { city: string; country: string };
+            count: number;
+        }>([
+            { $match: { hour: { $gte: firstHour } } },
+            {
+                $group: {
+                    _id: { city: '$city', country: '$country' },
+                    count: { $sum: '$count' },
+                },
+            },
+        ]);
+
+        let unknown = 0;
+        const known: { label: string; count: number }[] = [];
+        for (const row of rows) {
+            const { city, country } = row._id;
+            if (!city && !country) {
+                unknown += row.count;
+                continue;
+            }
+            known.push({
+                label: city
+                    ? [city, country].filter(Boolean).join(', ')
+                    : country,
+                count: row.count,
+            });
+        }
+
+        known.sort(
+            (a, b) => b.count - a.count || a.label.localeCompare(b.label),
+        );
+        const total = known.reduce((sum, place) => sum + place.count, 0);
+        const withShare = (place: { label: string; count: number }) => ({
+            ...place,
+            share: total ? place.count / total : 0,
+        });
+        const top = known.slice(0, 8);
+        const bottom = known.slice(top.length).reverse().slice(0, 5);
+
+        return {
+            top: top.map(withShare),
+            bottom: bottom.map(withShare),
+            total_places: known.length,
+            located_visits: total,
+            unknown_visits: unknown,
         };
     }
 
@@ -491,98 +623,6 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
             top,
             posts_with_hashtags: postsWithTags,
             unique_hashtags: tags.size,
-        };
-    }
-
-    private async searchInsights(from: Date, previousFrom: Date) {
-        const currentMatch = { created_at: { $gte: from } };
-        const previousMatch = {
-            created_at: { $gte: previousFrom, $lt: from },
-        };
-        const [
-            searches,
-            searches_prev,
-            empty,
-            empty_prev,
-            hashtag_searches,
-            unique_queries,
-            series,
-            top_queries,
-            top_hashtag_queries,
-            zero_queries,
-        ] = await Promise.all([
-            this.searchLogs.countDocuments(currentMatch),
-            this.searchLogs.countDocuments(previousMatch),
-            this.searchLogs.countDocuments({ ...currentMatch, hits: 0 }),
-            this.searchLogs.countDocuments({ ...previousMatch, hits: 0 }),
-            this.searchLogs.countDocuments({
-                ...currentMatch,
-                kind: 'hashtag',
-            }),
-            this.searchLogs
-                .distinct('query', currentMatch)
-                .then((rows) => rows.filter(Boolean).length),
-            this.searchLogs.aggregate([
-                { $match: currentMatch },
-                {
-                    $group: {
-                        _id: this.dayKeyExpr('created_at'),
-                        count: { $sum: 1 },
-                    },
-                },
-                { $sort: { _id: 1 } },
-            ]),
-            this.searchLogs.aggregate([
-                { $match: currentMatch },
-                {
-                    $group: {
-                        _id: '$query',
-                        count: { $sum: 1 },
-                        hits: { $sum: '$hits' },
-                        empty: {
-                            $sum: { $cond: [{ $eq: ['$hits', 0] }, 1, 0] },
-                        },
-                    },
-                },
-                { $sort: { count: -1 } },
-                { $limit: 5 },
-                {
-                    $project: {
-                        query: '$_id',
-                        count: 1,
-                        hits: 1,
-                        empty: 1,
-                        _id: 0,
-                    },
-                },
-            ]),
-            this.searchLogs.aggregate([
-                { $match: { ...currentMatch, kind: 'hashtag' } },
-                { $group: { _id: '$query', count: { $sum: 1 } } },
-                { $sort: { count: -1 } },
-                { $limit: 8 },
-                { $project: { query: '$_id', count: 1, _id: 0 } },
-            ]),
-            this.searchLogs.aggregate([
-                { $match: { ...currentMatch, hits: 0 } },
-                { $group: { _id: '$query', count: { $sum: 1 } } },
-                { $sort: { count: -1 } },
-                { $limit: 8 },
-                { $project: { query: '$_id', count: 1, _id: 0 } },
-            ]),
-        ]);
-
-        return {
-            searches,
-            searches_prev,
-            empty,
-            empty_prev,
-            hashtag_searches,
-            unique_queries,
-            series: series as { _id: string; count: number }[],
-            top_queries,
-            top_hashtag_queries,
-            zero_queries,
         };
     }
 

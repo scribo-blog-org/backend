@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsOptional, IsString } from 'class-validator';
 import {
     IsDescription,
     IsEmailCode,
@@ -50,6 +50,12 @@ export class UpdateRoleDto {
     @ApiProperty({ example: 'author' })
     @IsString()
     userRole!: string;
+}
+
+export class UpdateVerifiedDto {
+    @ApiProperty()
+    @IsBoolean()
+    verified!: boolean;
 }
 
 export class VerificationEmailDto {

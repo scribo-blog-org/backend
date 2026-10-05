@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import type { Connection } from 'mongoose';
 import { mongoUri } from '../config/startup';
 import { Session, SessionSchema } from './schemas/session.schema';
 import { User, UserSchema } from './schemas/user.schema';
@@ -21,7 +22,16 @@ import {
     VisitDaySchema,
     VisitHour,
     VisitHourSchema,
+    VisitPlace,
+    VisitPlaceSchema,
+    VisitUser,
+    VisitUserSchema,
 } from './schemas/visit-bucket.schema';
+import {
+    RequestMetricHour,
+    RequestMetricHourSchema,
+} from './schemas/request-metric.schema';
+import { dbTimingPlugin } from './db-timing.plugin';
 import {
     SearchQueryLog,
     SearchQueryLogSchema,
@@ -47,6 +57,10 @@ import { Backup, BackupSchema } from './schemas/backup.schema';
                     connectTimeoutMS: 8000,
                     socketTimeoutMS: 10000,
                     bufferCommands: false,
+                    connectionFactory: (connection: Connection) => {
+                        connection.plugin(dbTimingPlugin);
+                        return connection;
+                    },
                 };
             },
         }),
@@ -64,6 +78,12 @@ import { Backup, BackupSchema } from './schemas/backup.schema';
             { name: AppLog.name, schema: AppLogSchema },
             { name: VisitDay.name, schema: VisitDaySchema },
             { name: VisitHour.name, schema: VisitHourSchema },
+            { name: VisitPlace.name, schema: VisitPlaceSchema },
+            { name: VisitUser.name, schema: VisitUserSchema },
+            {
+                name: RequestMetricHour.name,
+                schema: RequestMetricHourSchema,
+            },
             { name: SearchQueryLog.name, schema: SearchQueryLogSchema },
             { name: Conversation.name, schema: ConversationSchema },
             { name: ChatMessage.name, schema: ChatMessageSchema },
