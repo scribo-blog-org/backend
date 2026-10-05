@@ -17,8 +17,11 @@ import { PERMISSIONS } from '../../authz/permissions';
 import type { Actor } from '../../authz/policy';
 import { ROLE_VALUES, type Role } from '../../authz/roles';
 import { fieldError } from '../../http/http-errors';
-import { ListUsersQueryDto } from '../../http/query.dto';
-import { UpdateRoleDto } from '../auth/dto/auth.dto';
+import {
+    AdminListUsersQueryDto,
+    ListUsersQueryDto,
+} from '../../http/query.dto';
+import { UpdateRoleDto, UpdateVerifiedDto } from '../auth/dto/auth.dto';
 import { UsersService } from './users.service';
 
 @ApiTags('users')
@@ -42,6 +45,15 @@ export class UsersController {
             is_verified: query.is_verified,
             viewerId: actor?.id,
         });
+        return { status: true, message: 'Users fetched', data };
+    }
+
+    @ApiBearerAuth()
+    @RequirePermissions(PERMISSIONS.VIEW_LOGS)
+    @Get('admin/list')
+    @ApiOperation({ summary: 'Paginated users with activity, for admins' })
+    async adminList(@Query() query: AdminListUsersQueryDto) {
+        const data = await this.users.adminList(query);
         return { status: true, message: 'Users fetched', data };
     }
 
@@ -86,5 +98,22 @@ export class UsersController {
             actor,
         );
         return { status: true, message: 'Role updated', data };
+    }
+
+    @ApiBearerAuth()
+    @RequirePermissions(PERMISSIONS.MANAGE_VERIFICATION)
+    @Patch(':id/verified')
+    @ApiOperation({ summary: 'Give or take away the verified badge' })
+    async updateVerified(
+        @Param('id') id: string,
+        @Body() dto: UpdateVerifiedDto,
+        @CurrentUser() actor: Actor,
+    ) {
+        const data = await this.users.setVerified(id, dto.verified, actor);
+        return {
+            status: true,
+            message: dto.verified ? 'User verified' : 'Verification removed',
+            data,
+        };
     }
 }

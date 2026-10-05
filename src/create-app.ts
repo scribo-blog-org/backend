@@ -11,7 +11,11 @@ import {
 } from './files/files.config';
 import { ApiExceptionFilter } from './http/api-exception.filter';
 import { LoggerService } from './infra/logger.service';
-import { requestContextMiddleware } from './infra/request-context';
+import {
+    requestContextMiddleware,
+    requestTimingMiddleware,
+} from './infra/request-context';
+import { RequestMetricsService } from './modules/analytics/request-metrics.service';
 import { openApiDocument } from './http/openapi-document';
 import { ScriboValidationPipe } from './http/scribo-validation.pipe';
 
@@ -30,6 +34,14 @@ function isLocalBrowserOrigin(origin: string): boolean {
 function loggerOf(app: INestApplication): LoggerService | undefined {
     try {
         return app.get(LoggerService, { strict: false });
+    } catch {
+        return undefined;
+    }
+}
+
+function metricsOf(app: INestApplication): RequestMetricsService | undefined {
+    try {
+        return app.get(RequestMetricsService, { strict: false });
     } catch {
         return undefined;
     }
@@ -55,6 +67,10 @@ export async function configureScriboApp(
     });
     app.use(cookieParser());
     app.use(requestContextMiddleware);
+    const metrics = metricsOf(app);
+    if (metrics) {
+        app.use(requestTimingMiddleware((sample) => metrics.record(sample)));
+    }
     if (backendServesUploads(process.env)) {
         (app as NestExpressApplication).useStaticAssets(
             uploadsDir({ get: (key: string) => process.env[key] }),

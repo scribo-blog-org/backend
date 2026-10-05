@@ -12,7 +12,11 @@ import type { Actor } from '../../authz/policy';
 import { DEFAULT_ROLE, type Role } from '../../authz/roles';
 import { LoggerService } from '../../infra/logger.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { parsePagination, paginationMeta } from '../../http/pagination';
+import { Post } from '../../database/schemas/post.schema';
+import { PostComment } from '../../database/schemas/post-comment.schema';
 import { Session } from '../../database/schemas/session.schema';
+import { ROLE_VALUES } from '../../authz/roles';
 import { User } from '../../database/schemas/user.schema';
 
 type UserLean = {
@@ -37,6 +41,9 @@ export class UsersService implements OnModuleInit {
     constructor(
         @InjectModel(User.name) private readonly users: Model<User>,
         @InjectModel(Session.name) private readonly sessions: Model<Session>,
+        @InjectModel(Post.name) private readonly posts: Model<Post>,
+        @InjectModel(PostComment.name)
+        private readonly comments: Model<PostComment>,
         private readonly logger: LoggerService,
         private readonly notificationsService: NotificationsService,
     ) {}
@@ -151,6 +158,130 @@ export class UsersService implements OnModuleInit {
         return users.map((user) =>
             this.sanitize(user, { viewerId: params.viewerId })!,
         );
+    }
+
+    async adminList(params: {
+        page?: number;
+        limit?: number;
+        search?: string;
+        sort?: string;
+        roles?: string;
+    }) {
+        const { page, limit, skip } = parsePagination(params, 20);
+        const query: Record<string, unknown> = {};
+
+        const search = params.search?.trim();
+        if (search) {
+            const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            query.$or = [
+                { nick_name: { $regex: escaped, $options: 'i' } },
+                { email: { $regex: escaped, $options: 'i' } },
+            ];
+        }
+
+        if (params.roles === 'staff') {
+            query.role = { $ne: DEFAULT_ROLE };
+        } else if (params.roles) {
+            const roles = params.roles
+                .split(',')
+                .filter((role) => ROLE_VALUES.includes(role as Role));
+            if (roles.length) query.role = { $in: roles };
+        }
+
+        const sortField =
+            params.sort === 'registered' ? 'created_date' : 'last_activity_at';
+        const day = 24 * 60 * 60 * 1000;
+        const now = Date.now();
+
+        const [items, total, everyone, active24h, active7d, new7d] =
+            await Promise.all([
+                this.users
+                    .find(query)
+                    .select('-password -notifications -saved_posts')
+                    .sort({ [sortField]: -1, _id: -1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean<UserLean[]>(),
+                this.users.countDocuments(query),
+                this.users.estimatedDocumentCount(),
+                this.users.countDocuments({
+                    last_activity_at: { $gte: new Date(now - day) },
+                }),
+                this.users.countDocuments({
+                    last_activity_at: { $gte: new Date(now - 7 * day) },
+                }),
+                this.users.countDocuments({
+                    created_date: { $gte: new Date(now - 7 * day) },
+                }),
+            ]);
+
+        const ids = items.map((user) => user._id);
+        const [postCounts, commentCounts] = await Promise.all([
+            this.posts.aggregate<{ _id: Types.ObjectId; n: number }>([
+                { $match: { author: { $in: ids } } },
+                { $group: { _id: '$author', n: { $sum: 1 } } },
+            ]),
+            this.comments.aggregate<{ _id: Types.ObjectId; n: number }>([
+                { $match: { author: { $in: ids } } },
+                { $group: { _id: '$author', n: { $sum: 1 } } },
+            ]),
+        ]);
+        const posts = new Map(
+            postCounts.map((row) => [String(row._id), row.n]),
+        );
+        const comments = new Map(
+            commentCounts.map((row) => [String(row._id), row.n]),
+        );
+
+        return {
+            items: items.map((user) => ({
+                ...user,
+                followers_count: user.followers?.length ?? 0,
+                posts_count: posts.get(String(user._id)) ?? 0,
+                comments_count: comments.get(String(user._id)) ?? 0,
+            })),
+            pagination: paginationMeta(page, limit, total),
+            summary: {
+                total: everyone,
+                active_24h: active24h,
+                active_7d: active7d,
+                new_7d: new7d,
+            },
+        };
+    }
+
+    async setVerified(userId: string, verified: boolean, actor: Actor) {
+        if (!Types.ObjectId.isValid(userId)) {
+            throw new NotFoundException('User not found');
+        }
+        const user = await this.users.findById(userId).lean<UserLean>();
+        if (!user) {
+            throw new NotFoundException('User not found');
+        }
+        if (Boolean(user.is_verified) === verified) {
+            throw new ConflictException(
+                verified ? 'User is already verified' : 'User is not verified',
+            );
+        }
+
+        const result = await this.users
+            .findByIdAndUpdate(
+                user._id,
+                { is_verified: verified },
+                { returnDocument: 'after' },
+            )
+            .lean<UserLean>();
+        await this.logger.action(
+            'update_verified',
+            actor,
+            {
+                updated_user: user._id,
+                target_nick: user.nick_name,
+                verified,
+            },
+            `User ${actor.nick_name} ${verified ? 'verified' : 'unverified'} user ${user.nick_name}`,
+        );
+        return this.sanitize(result);
     }
 
     async follow(userId: string, actor: Actor) {
