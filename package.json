@@ -1,6 +1,6 @@
 {
   "name": "scribo_nest",
-  "version": "8.1.0",
+  "version": "8.2.0",
   "description": "",
   "author": "",
   "private": true,
@@ -17,6 +17,7 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
+    "chat:reencrypt": "node dist/modules/chat/reencrypt-chat.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",

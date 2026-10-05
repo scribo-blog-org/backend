@@ -106,6 +106,8 @@ Listens on `http://localhost:3001`.
 | `JWT_PUBLIC_KEY` | yes | RS256 public key. Verifies access tokens here and in the socket service |
 | `JWT_REFRESH_KEY` | yes | Separate refresh secret |
 | `PASSWORD_SALT` | no | bcrypt rounds, `10` by default |
+| `CHAT_ENCRYPTION_KEYS` | yes | Chat text keys as `id:secret,id:secret`. Keep old ids until everything is re-encrypted |
+| `CHAT_ENCRYPTION_ACTIVE_KEY` | yes | The id from the list that new messages are encrypted with |
 | `FRONTEND_ORIGIN` | in production | CORS origin and the base of links in e-mails, no trailing slash |
 | `API_ORIGIN` | no | Public origin advertised in OpenAPI |
 | `MAIL_SENDER`, `MAIL_PASSWORD` | for mail | Gmail account and app password |
@@ -132,6 +134,27 @@ File handling is isolated in `src/files`, the same way the database is isolated 
 Images are stored under `UPLOADS_DIR/src/<kind>/<id>.<ext>`, where the kind is `avatar`, `featured_image` or `group`. Files are mode 644, directories 755, and intermediate directories are created on first write — adding a new kind requires no manual setup on the server. The database stores the path `/uploads/src/...` without a domain; the client prefixes the origin of its own environment.
 
 In production the directory is served by the nginx container of the `edge` stack, straight from the bind mount and read-only, so Node never streams an image. In development, with no nginx in front, the backend serves it itself (`SERVE_UPLOADS`, on by default outside `NODE_ENV=production`). Legacy S3 URLs still in the database keep working, but such files are not deleted when a post or avatar changes. `backend/uploads` is not tracked in git.
+
+## Chat encryption
+
+Message text is encrypted before it reaches MongoDB, so a database dump or a backup never contains it in the clear. Only the body is encrypted: `chat_messages.text` and the preview `conversations.last_message_text`. Sender, time, replies and system events stay readable. The logic is in `src/modules/chat/chat-crypto.ts` and is used by `ChatService`.
+
+Each value is stored as `enc:v1:<key id>:<base64>`: AES-256-GCM with a fresh IV, the key derived from the secret with SHA-256. The key id selects the secret on read, so several keys can coexist. Plain text is not accepted: reading a value without the prefix is an error, and the backend does not start without `CHAT_ENCRYPTION_KEYS` and `CHAT_ENCRYPTION_ACTIVE_KEY`.
+
+```bash
+CHAT_ENCRYPTION_KEYS=k1:first-secret,k2:second-secret
+CHAT_ENCRYPTION_ACTIVE_KEY=k2
+```
+
+Rotating a key: add the new id, make it active and restart, run the re-encrypt script, then drop the old id. Archives made before the last step still need the old key to be read after a restore. Losing a key makes the texts it protected unrecoverable.
+
+The re-encrypt script brings every stored text to the active key. It also encrypts plain text, which is how the first rollout migrates existing messages. It is safe to run again and while the backend is up: a write only applies if the value is still the one that was read.
+
+```bash
+npm run chat:reencrypt -- --dry-run     # count only
+npm run chat:reencrypt
+./scribo dc prod exec backend node dist/modules/chat/reencrypt-chat.js
+```
 
 ## Backups
 
@@ -234,6 +257,7 @@ npm run lint:check
 npm run test
 npm run test:e2e
 npm run test:cov
+npm run chat:reencrypt
 ```
 
 ## Layout
