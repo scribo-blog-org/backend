@@ -85,9 +85,19 @@ describe('toEntities', () => {
                     name: 'Hello',
                     last,
                     count: 3,
+                    deleted: true,
                 },
             ]),
-        ).toEqual([{ type: 'post', id: 'p1', name: 'Hello', count: 3, last }]);
+        ).toEqual([
+            {
+                type: 'post',
+                id: 'p1',
+                name: 'Hello',
+                count: 3,
+                last,
+                deleted: true,
+            },
+        ]);
     });
 });
 
