@@ -18,6 +18,7 @@ import { OptionalAuth, Public } from '../../authz/decorators/public.decorator';
 import { RequirePermissions } from '../../authz/decorators/require-permissions.decorator';
 import { PERMISSIONS } from '../../authz/permissions';
 import type { Actor } from '../../authz/policy';
+import { RateLimits } from '../../http/rate-limit.guard';
 import { clientIp } from '../../visitor/geo';
 import { ParseMongoIdPipe } from '../../http/mongo-id';
 import { ListPostsQueryDto } from '../../http/query.dto';
@@ -43,6 +44,12 @@ export class PostsController {
 
     @ApiBearerAuth()
     @RequirePermissions(PERMISSIONS.CREATE_POST)
+    @RateLimits({
+        name: 'post-create',
+        windowMs: 60_000,
+        max: 2,
+        by: 'user',
+    })
     @Post()
     @ApiConsumes('multipart/form-data')
     @UseInterceptors(imageFileInterceptor('featuredImage'))

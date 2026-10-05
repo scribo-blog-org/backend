@@ -2,7 +2,7 @@ import { PERMISSIONS, type Permission } from './permissions';
 import { ROLES, type Role } from './roles';
 
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
-    [ROLES.USER]: [],
+    [ROLES.USER]: [PERMISSIONS.CREATE_POST],
     [ROLES.AUTHOR]: [PERMISSIONS.CREATE_POST],
     [ROLES.MODERATOR]: [
         PERMISSIONS.CREATE_POST,
