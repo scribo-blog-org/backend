@@ -11,11 +11,19 @@ export type RequestMeta = {
 };
 
 const storage = new AsyncLocalStorage<RequestMeta>();
+const dbStorage = new AsyncLocalStorage<DbTimer>();
+
+export type DbTimer = { ms: number };
 
 const USER_AGENT_LIMIT = 200;
 
 export function currentRequest(): RequestMeta | undefined {
     return storage.getStore();
+}
+
+export function addDbTime(ms: number) {
+    const timer = dbStorage.getStore();
+    if (timer) timer.ms += ms;
 }
 
 export function requestMeta(req: Request): RequestMeta {
@@ -36,4 +44,31 @@ export function requestContextMiddleware(
     next: NextFunction,
 ) {
     storage.run(requestMeta(req), next);
+}
+
+export function requestTimingMiddleware(
+    record: (sample: {
+        route: string;
+        total_ms: number;
+        db_ms: number;
+    }) => void,
+) {
+    return (req: Request, res: Response, next: NextFunction) => {
+        if (req.method === 'OPTIONS') {
+            next();
+            return;
+        }
+        const startedAt = performance.now();
+        const timer: DbTimer = { ms: 0 };
+        res.on('finish', () => {
+            const path = req.route?.path;
+            if (typeof path !== 'string') return;
+            record({
+                route: `${req.method} ${req.baseUrl || ''}${path}`,
+                total_ms: performance.now() - startedAt,
+                db_ms: timer.ms,
+            });
+        });
+        dbStorage.run(timer, next);
+    };
 }
