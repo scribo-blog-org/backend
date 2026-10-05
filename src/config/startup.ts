@@ -1,10 +1,13 @@
 import { ConfigService } from '@nestjs/config';
+import { ChatCrypto } from '../modules/chat/chat-crypto';
 import { assertKeyPair } from './jwt-keys';
 
 const REQUIRED_ENV = [
     'JWT_PRIVATE_KEY',
     'JWT_PUBLIC_KEY',
     'REDIS_URL',
+    'CHAT_ENCRYPTION_KEYS',
+    'CHAT_ENCRYPTION_ACTIVE_KEY',
 ] as const;
 
 export function assertSetup(env: NodeJS.ProcessEnv) {
@@ -18,6 +21,10 @@ export function assertSetup(env: NodeJS.ProcessEnv) {
         throw new Error(`Setup failed, missing: ${missing.join(', ')}`);
     }
     assertKeyPair(env.JWT_PRIVATE_KEY!.trim(), env.JWT_PUBLIC_KEY!.trim());
+    new ChatCrypto(
+        env.CHAT_ENCRYPTION_KEYS!.trim(),
+        env.CHAT_ENCRYPTION_ACTIVE_KEY!.trim(),
+    );
 }
 
 export function mongoUri(config: ConfigService) {
