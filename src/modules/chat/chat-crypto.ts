@@ -45,23 +45,6 @@ export class ChatCrypto {
         }
     }
 
-    static isEncrypted(value: string): boolean {
-        return value.startsWith(PREFIX);
-    }
-
-    /** The id of the key a stored value was encrypted with. */
-    static keyIdOf(value: string): string {
-        const [id] = value.slice(PREFIX.length).split(':');
-        return id;
-    }
-
-    isActive(value: string): boolean {
-        return (
-            ChatCrypto.isEncrypted(value) &&
-            ChatCrypto.keyIdOf(value) === this.activeId
-        );
-    }
-
     encrypt(text: string): string {
         const iv = randomBytes(IV_BYTES);
         const cipher = createCipheriv(
@@ -78,7 +61,7 @@ export class ChatCrypto {
     }
 
     decrypt(value: string): string {
-        if (!ChatCrypto.isEncrypted(value)) {
+        if (!value.startsWith(PREFIX)) {
             throw new Error('Stored chat text is not encrypted');
         }
         const [id, encoded] = value.slice(PREFIX.length).split(':');

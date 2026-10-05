@@ -146,15 +146,7 @@ CHAT_ENCRYPTION_KEYS=k1:first-secret,k2:second-secret
 CHAT_ENCRYPTION_ACTIVE_KEY=k2
 ```
 
-Rotating a key: add the new id, make it active and restart, run the re-encrypt script, then drop the old id. Archives made before the last step still need the old key to be read after a restore. Losing a key makes the texts it protected unrecoverable.
-
-The re-encrypt script brings every stored text to the active key. It also encrypts plain text, which is how the first rollout migrates existing messages. It is safe to run again and while the backend is up: a write only applies if the value is still the one that was read.
-
-```bash
-npm run chat:reencrypt -- --dry-run     # count only
-npm run chat:reencrypt
-./scribo dc prod exec backend node dist/modules/chat/reencrypt-chat.js
-```
+Rotating a key: add the new id to the list and make it active. Messages written earlier stay on the key they were encrypted with, so an old id must stay in the list for as long as those messages exist; removing it makes them unreadable, and so are archives made under it. Losing a key makes the texts it protected unrecoverable.
 
 ## Backups
 
@@ -257,7 +249,6 @@ npm run lint:check
 npm run test
 npm run test:e2e
 npm run test:cov
-npm run chat:reencrypt
 ```
 
 ## Layout
