@@ -23,6 +23,7 @@ import { User } from '../../database/schemas/user.schema';
 import { FilesService } from '../../files/files.service';
 import { SocketService } from '../../socket/socket.service';
 import { UsersService } from '../users/users.service';
+import { ChatCrypto } from './chat-crypto';
 import { chatStartedEmailTemplate } from './chat-started-email';
 
 const MAX_GROUP_MEMBERS = 50;
@@ -69,6 +70,8 @@ type ConversationLean = {
 
 @Injectable()
 export class ChatService {
+    private readonly crypto: ChatCrypto;
+
     constructor(
         @InjectModel(Conversation.name)
         private readonly conversations: Model<Conversation>,
@@ -81,7 +84,12 @@ export class ChatService {
         private readonly mail: MailService,
         private readonly config: ConfigService,
         private readonly logger: LoggerService,
-    ) {}
+    ) {
+        this.crypto = new ChatCrypto(
+            this.config.get<string>('CHAT_ENCRYPTION_KEYS') ?? '',
+            this.config.get<string>('CHAT_ENCRYPTION_ACTIVE_KEY') ?? '',
+        );
+    }
 
     private participantKey(a: string, b: string) {
         return [String(a), String(b)].sort().join(':');
@@ -220,7 +228,7 @@ export class ChatService {
             _id: String(message._id),
             conversation_id: String(message.conversation_id),
             sender,
-            text: message.deleted_at ? '' : message.text,
+            text: message.deleted_at ? '' : this.crypto.decrypt(message.text),
             reply_to: message.reply_to ? String(message.reply_to) : null,
             system_event: systemEvent,
             deleted_at: message.deleted_at || null,
@@ -298,7 +306,9 @@ export class ChatService {
         const unread = await this.unreadForConversation(row, userId);
         const base = {
             _id: String(row._id),
-            last_message_text: row.last_message_text,
+            last_message_text: row.last_message_text
+                ? this.crypto.decrypt(row.last_message_text)
+                : '',
             last_message_sender_name: row.last_message_sender_name || '',
             last_message_at: row.last_message_at,
             unread,
@@ -473,10 +483,11 @@ export class ChatService {
         text: string,
         recipientIds?: string[],
     ) {
+        const encrypted = this.crypto.encrypt(text);
         const created = await this.messages.create({
             conversation_id: conversation._id,
             sender_id: this.assertObjectId(actorId),
-            text,
+            text: encrypted,
             system_event: event,
         });
         const createdAt =
@@ -485,7 +496,7 @@ export class ChatService {
         await this.conversations.findByIdAndUpdate(conversation._id, {
             $set: {
                 last_message_id: created._id,
-                last_message_text: text,
+                last_message_text: encrypted,
                 last_message_sender_name: '',
                 last_message_at: createdAt,
             },
@@ -1142,7 +1153,9 @@ export class ChatService {
                 reply_preview: reply
                     ? {
                           _id: String(reply._id),
-                          text: reply.deleted_at ? '' : reply.text,
+                          text: reply.deleted_at
+                              ? ''
+                              : this.crypto.decrypt(reply.text),
                           deleted: Boolean(reply.deleted_at),
                           sender: this.serializeUser(
                               reply.sender_id as UserLean,
@@ -1186,10 +1199,11 @@ export class ChatService {
             replyTo = parent._id;
         }
 
+        const encrypted = this.crypto.encrypt(text);
         const created = await this.messages.create({
             conversation_id: conversation._id,
             sender_id: this.assertObjectId(actor.id),
-            text,
+            text: encrypted,
             reply_to: replyTo,
         });
 
@@ -1201,7 +1215,7 @@ export class ChatService {
         await this.conversations.findByIdAndUpdate(conversation._id, {
             $set: {
                 last_message_id: created._id,
-                last_message_text: text,
+                last_message_text: encrypted,
                 last_message_sender_name: actor.nick_name || '',
                 last_message_at: new Date(),
             },
@@ -1246,7 +1260,7 @@ export class ChatService {
         }
         return {
             _id: String(reply._id),
-            text: reply.deleted_at ? '' : reply.text,
+            text: reply.deleted_at ? '' : this.crypto.decrypt(reply.text),
             deleted: Boolean(reply.deleted_at),
             sender: this.serializeUser(reply.sender_id as UserLean),
         };
@@ -1466,7 +1480,7 @@ export class ChatService {
         ) {
             throw new BadRequestException('Invalid message text');
         }
-        if (text === message.text) {
+        if (text === this.crypto.decrypt(message.text)) {
             throw new BadRequestException('Message text is unchanged');
         }
 
@@ -1476,13 +1490,14 @@ export class ChatService {
         );
 
         const editedAt = new Date();
+        const encrypted = this.crypto.encrypt(text);
         await this.messages.findByIdAndUpdate(messageId, {
-            $set: { text, edited_at: editedAt },
+            $set: { text: encrypted, edited_at: editedAt },
         });
 
         const conversationUpdate: Record<string, unknown> = {};
         if (String(conversation.last_message_id) === messageId) {
-            conversationUpdate.last_message_text = text;
+            conversationUpdate.last_message_text = encrypted;
         }
         if (Object.keys(conversationUpdate).length) {
             await this.conversations.findByIdAndUpdate(conversation._id, {

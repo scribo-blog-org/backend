@@ -1,6 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
-import { FIELD_LIMITS } from '../../validation/field-limits';
 
 export type ChatMessageDocument = HydratedDocument<ChatMessage>;
 
@@ -29,11 +28,8 @@ export class ChatMessage {
     @Prop({ type: Types.ObjectId, ref: 'User', required: true })
     sender_id!: Types.ObjectId;
 
-    @Prop({
-        required: true,
-        minlength: FIELD_LIMITS.chatMessage.min,
-        maxlength: FIELD_LIMITS.chatMessage.max,
-    })
+    // Stored encrypted; the length limits are enforced on the plain text before encryption.
+    @Prop({ required: true })
     text!: string;
 
     @Prop({ type: Types.ObjectId, ref: 'ChatMessage', default: null })
