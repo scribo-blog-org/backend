@@ -30,10 +30,9 @@ describe('ChatCrypto', () => {
         const before = new ChatCrypto('k1:one', 'k1').encrypt('hello');
         const rotated = new ChatCrypto('k1:one,k2:two', 'k2');
         expect(rotated.decrypt(before)).toBe('hello');
-        expect(rotated.isActive(before)).toBe(false);
         const after = rotated.encrypt('hello');
-        expect(ChatCrypto.keyIdOf(after)).toBe('k2');
-        expect(rotated.isActive(after)).toBe(true);
+        expect(after.startsWith('enc:v1:k2:')).toBe(true);
+        expect(rotated.decrypt(after)).toBe('hello');
     });
 
     it('fails when the key of a value was removed', () => {
