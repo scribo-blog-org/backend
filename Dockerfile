@@ -7,7 +7,9 @@ RUN npm run build
 
 FROM node:22-alpine
 WORKDIR /app
-ENV NODE_ENV=production
+ARG GIT_SHA=
+ENV NODE_ENV=production \
+    GIT_SHA=$GIT_SHA
 RUN apk add --no-cache mongodb-tools tar
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
