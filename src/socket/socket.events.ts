@@ -7,6 +7,9 @@ export class SocketEvents {
 
     constructor(private readonly redis: RedisPublisher) {}
 
+    // Staff-only room; the socket service decides who may join it.
+    readonly adminRoom = 'admin';
+
     chatRoom(conversationId: string) {
         return `chat:${conversationId}`;
     }
@@ -80,5 +83,9 @@ export class SocketEvents {
         await this.broadcast(`user:${userId}`, 'chat:conversation-deleted', {
             conversation_id: conversationId,
         });
+    }
+
+    async adminSupportNew(count: number): Promise<void> {
+        await this.broadcast(this.adminRoom, 'support:new', { count });
     }
 }

@@ -16,6 +16,7 @@ import { FIELD_LIMITS } from '../../validation/field-limits';
 import { LoggerService } from '../../infra/logger.service';
 import { textPreview } from '../../infra/log-helpers';
 import { MailService } from '../../infra/mail.service';
+import { SocketService } from '../../socket/socket.service';
 import { paginationMeta, parsePagination } from '../../http/pagination';
 import type { ListSupportQueryDto } from '../../http/query.dto';
 import { supportEmailTemplate } from './support-email';
@@ -68,6 +69,7 @@ export class SupportService {
         private readonly users: UsersService,
         private readonly notifications: NotificationsService,
         private readonly mail: MailService,
+        private readonly socket: SocketService,
         private readonly logger: LoggerService,
         private readonly config: ConfigService,
     ) {}
@@ -85,6 +87,20 @@ export class SupportService {
             return { status: { $in: ['reviewed', 'answered'] } };
         if (normalized === 'in_review') return { status: 'in_review' };
         return {};
+    }
+
+    // Staff see a dot while at least one request is new. Sending the current
+    // total instead of a delta keeps every open admin tab correct, whoever
+    // changed the request.
+    private async broadcastNewCount() {
+        try {
+            const count = await this.tickets.countDocuments(
+                this.statusFilter('new'),
+            );
+            this.socket.adminSupportNew(count);
+        } catch (error) {
+            console.error('Failed to broadcast new support requests', error);
+        }
     }
 
     private requestPageUrl(accessKey?: string) {
@@ -329,6 +345,8 @@ export class SupportService {
             replies: [],
         });
 
+        await this.broadcastNewCount();
+
         const kindLabel = KIND_LABELS[supportKind] || supportKind;
         if (!authenticated) {
             void this.sendSupportMail({
@@ -522,6 +540,9 @@ export class SupportService {
                 { returnDocument: 'after' },
             )
             .lean<SupportLean>();
+        if (!asStaff) {
+            await this.broadcastNewCount();
+        }
         if (asStaff) {
             await this.notifyTicketOwner(
                 existing,
@@ -589,6 +610,7 @@ export class SupportService {
                 { returnDocument: 'after' },
             )
             .lean<SupportLean>();
+        await this.broadcastNewCount();
         const statusLabel = STATUS_LABELS[nextStatus];
         await this.notifyTicketOwner(
             existing,
