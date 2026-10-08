@@ -41,7 +41,7 @@ export class PushService {
         const subject =
             config.get<string>('VAPID_SUBJECT')?.trim() ||
             config.get<string>('FRONTEND_ORIGIN')?.trim() ||
-            'mailto:admin@scribo.pp.ua';
+            'mailto:scribo.blog.dev@gmail.com';
 
         this.enabled = Boolean(this.publicKey && privateKey);
         if (this.enabled) {
