@@ -40,15 +40,14 @@ export class PushService {
         const privateKey = config.get<string>('VAPID_PRIVATE_KEY')?.trim();
         const subject =
             config.get<string>('VAPID_SUBJECT')?.trim() ||
-            config.get<string>('FRONTEND_ORIGIN')?.trim() ||
-            'mailto:scribo.blog.dev@gmail.com';
+            config.get<string>('FRONTEND_ORIGIN')?.trim();
 
-        this.enabled = Boolean(this.publicKey && privateKey);
+        this.enabled = Boolean(this.publicKey && privateKey && subject);
         if (this.enabled) {
-            webpush.setVapidDetails(subject, this.publicKey, privateKey!);
+            webpush.setVapidDetails(subject!, this.publicKey, privateKey!);
         } else {
             this.logger.warn(
-                'VAPID keys are not set, push notifications are disabled',
+                'VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY or VAPID_SUBJECT is not set, push notifications are disabled',
             );
         }
     }
