@@ -156,6 +156,9 @@ export class SupportService {
                     .filter(Boolean),
             ),
         ];
+        const [requester] = item.user
+            ? await this.users.getPublicByIds([item.user])
+            : [];
         const admins = await this.users.getPublicByIds(adminIds);
         const adminsById = new Map(
             admins.map((admin) => [String(admin._id), admin]),
@@ -190,6 +193,14 @@ export class SupportService {
             created_date: item.created_date,
             updated_date: item.updated_date,
             anonymous: this.isAnonymousTicket(item),
+            requester: requester
+                ? {
+                      _id: requester._id,
+                      nick_name: requester.nick_name,
+                      avatar: requester.avatar,
+                      is_verified: requester.is_verified,
+                  }
+                : null,
             closed: this.isClosedTicket(item),
             can_reply: false,
             is_owner: false,
@@ -216,6 +227,7 @@ export class SupportService {
             ...(staff || owner
                 ? { status: this.normalizeStatus(item.status) }
                 : { status: undefined }),
+            requester: staff || owner ? detail.requester : null,
             email: staff ? item.email : undefined,
         };
     }
@@ -229,7 +241,9 @@ export class SupportService {
             message?: string;
         },
     ) {
-        this.notifyAnonymousByEmail(item, emailPayload);
+        // The email always goes out, also for account owners: the in-app
+        // notification and the request list stay as they are.
+        this.notifyByEmail(item, emailPayload);
         if (item.user) {
             await this.notifications.sendNotification(
                 String(item.user),
@@ -238,11 +252,11 @@ export class SupportService {
         }
     }
 
-    private notifyAnonymousByEmail(
+    private notifyByEmail(
         item: SupportLean,
         payload: { title: string; intro: string; message?: string },
     ) {
-        if (!this.isAnonymousTicket(item) || !item.email) return;
+        if (!item.email) return;
         void this.sendSupportMail({
             ...payload,
             to: item.email,
@@ -348,15 +362,13 @@ export class SupportService {
         await this.broadcastNewCount();
 
         const kindLabel = KIND_LABELS[supportKind] || supportKind;
-        if (!authenticated) {
-            void this.sendSupportMail({
-                to: email,
-                title: 'We received your request',
-                intro: `Thanks. We received your request (${kindLabel}). You can read the team's replies on the request page.`,
-                message: supportMessage,
-                url: this.requestPageUrl(access_key),
-            });
-        }
+        void this.sendSupportMail({
+            to: email,
+            title: 'We received your request',
+            intro: `Thanks. We received your request (${kindLabel}). You can read the team's replies on the request page.`,
+            message: supportMessage,
+            url: this.requestPageUrl(access_key),
+        });
 
         await this.logger.log({
             type: 'create_support_request',

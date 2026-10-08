@@ -14,6 +14,12 @@ export type PushPayload = {
     icon?: string;
 };
 
+export type DismissPayload = {
+    dismiss: true;
+    tag?: string;
+    tagPrefix?: string;
+};
+
 export type SubscriptionInput = {
     endpoint: string;
     keys: { p256dh: string; auth: string };
@@ -102,16 +108,35 @@ export class PushService {
         );
     }
 
-    async sendToUser(userId: string, payload: PushPayload) {
+    // Asks every device of the user to close notifications that are already
+    // on screen, e.g. after the chat or the notification list was read.
+    async dismissForUser(
+        userId: string,
+        target: { tag?: string; tagPrefix?: string },
+    ) {
+        await this.sendToUser(userId, { dismiss: true, ...target });
+    }
+
+    async sendToUser(userId: string, payload: PushPayload | DismissPayload) {
         if (!this.enabled) return;
 
         const rows = await this.subscriptions
             .find({ user: new Types.ObjectId(userId) })
             .lean();
         const body = JSON.stringify(payload);
+        const isDismiss = 'dismiss' in payload;
 
         await Promise.all(
             rows.map(async (row) => {
+                // iOS has to show a notification for every push and cannot
+                // reliably close it again, so a dismiss would only leave a
+                // blank notification there.
+                if (
+                    isDismiss &&
+                    /iPhone|iPad|iPod/i.test(row.user_agent ?? '')
+                ) {
+                    return;
+                }
                 try {
                     await webpush.sendNotification(
                         {
