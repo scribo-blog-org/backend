@@ -14,6 +14,12 @@ export type PushPayload = {
     icon?: string;
 };
 
+export type DismissPayload = {
+    dismiss: true;
+    tag?: string;
+    tagPrefix?: string;
+};
+
 export type SubscriptionInput = {
     endpoint: string;
     keys: { p256dh: string; auth: string };
@@ -102,7 +108,16 @@ export class PushService {
         );
     }
 
-    async sendToUser(userId: string, payload: PushPayload) {
+    // Asks every device of the user to close notifications that are already
+    // on screen, e.g. after the chat or the notification list was read.
+    async dismissForUser(
+        userId: string,
+        target: { tag?: string; tagPrefix?: string },
+    ) {
+        await this.sendToUser(userId, { dismiss: true, ...target });
+    }
+
+    async sendToUser(userId: string, payload: PushPayload | DismissPayload) {
         if (!this.enabled) return;
 
         const rows = await this.subscriptions

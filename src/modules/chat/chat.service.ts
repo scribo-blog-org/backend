@@ -1644,6 +1644,12 @@ export class ChatService {
             this.participantIds(conversation),
         );
 
+        void this.push
+            .dismissForUser(actor.id, {
+                tag: `chat:${String(conversation._id)}`,
+            })
+            .catch(() => undefined);
+
         await this.pushUnread(actor.id);
         await this.pushConversationUpdate(String(conversation._id), [actor.id]);
 
