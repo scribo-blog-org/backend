@@ -65,6 +65,7 @@ jobs:
       - name: Docker build
         run: |
           docker build \
+            --build-arg GIT_SHA="${{ github.sha }}" \
             -t "ghcr.io/scribo-blog-org/backend:${{ github.sha }}" \
             -t "ghcr.io/scribo-blog-org/backend:${{ steps.target.outputs.image_tag }}" \
             .

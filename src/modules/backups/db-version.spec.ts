@@ -71,17 +71,24 @@ describe('database version', () => {
             expect(logger.system).toHaveBeenCalledTimes(1);
         });
 
-        it('does not stop the server when the write fails', async () => {
+        it('stops the server and logs an error when the write fails', async () => {
             const connection = fakeConnection();
             connection.db.collection = () => {
                 throw new Error('mongo down');
             };
             const spy = jest.spyOn(console, 'error').mockImplementation();
+            const logger = fakeLogger();
             const service = new DbVersionService(
                 connection as any,
-                fakeLogger() as any,
+                logger as any,
             );
-            await expect(service.onModuleInit()).resolves.toBeUndefined();
+            await expect(service.onModuleInit()).rejects.toThrow('mongo down');
+            expect(logger.system).toHaveBeenCalledWith(
+                'db_version_failed',
+                expect.any(String),
+                { error: 'mongo down' },
+                'error',
+            );
             spy.mockRestore();
         });
     });

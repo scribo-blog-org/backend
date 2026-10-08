@@ -1,6 +1,6 @@
 import type { PipelineStage } from 'mongoose';
 
-export type LogEntityType = 'user' | 'post' | 'category';
+export type LogEntityType = 'user' | 'post' | 'category' | 'conversation';
 
 export type LogEntity = {
     type: LogEntityType;
@@ -15,6 +15,7 @@ export type EntityCollections = {
     users: string;
     posts: string;
     categories: string;
+    conversations: string;
 };
 
 export function escapeRegex(value: string): string {
@@ -72,6 +73,7 @@ export function entitiesPipeline(options: {
                         '$data.category',
                         '$data.category_snapshot.name',
                     ),
+                    entry('conversation', '$data.conversation', '$data.title'),
                 ],
             },
         },
@@ -94,6 +96,7 @@ export function entitiesPipeline(options: {
         ...live(collections.users, 'nick_name', 'liveUser'),
         ...live(collections.posts, 'title', 'livePost'),
         ...live(collections.categories, 'name', 'liveCategory'),
+        ...live(collections.conversations, 'title', 'liveConversation'),
         {
             $addFields: {
                 name: {
@@ -111,6 +114,17 @@ export function entitiesPipeline(options: {
                                         case: { $eq: ['$_id.type', 'post'] },
                                         then: {
                                             $arrayElemAt: ['$livePost.name', 0],
+                                        },
+                                    },
+                                    {
+                                        case: {
+                                            $eq: ['$_id.type', 'conversation'],
+                                        },
+                                        then: {
+                                            $arrayElemAt: [
+                                                '$liveConversation.name',
+                                                0,
+                                            ],
                                         },
                                     },
                                 ],
@@ -144,6 +158,15 @@ export function entitiesPipeline(options: {
                                             },
                                             then: '$livePost',
                                         },
+                                        {
+                                            case: {
+                                                $eq: [
+                                                    '$_id.type',
+                                                    'conversation',
+                                                ],
+                                            },
+                                            then: '$liveConversation',
+                                        },
                                     ],
                                     default: '$liveCategory',
                                 },
@@ -170,6 +193,7 @@ export function entitiesPipeline(options: {
                             liveUser: 0,
                             livePost: 0,
                             liveCategory: 0,
+                            liveConversation: 0,
                             snapshot: 0,
                         },
                     },

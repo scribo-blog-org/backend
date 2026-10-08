@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MailService } from '../../infra/mail.service';
+import { LoggerService } from '../../infra/logger.service';
 import { fieldError } from '../../http/http-errors';
 import { UsersService } from '../users/users.service';
 import { EmailCodesService, RESET_PURPOSE } from './email-codes.service';
@@ -19,6 +20,7 @@ export class PasswordResetService {
         private readonly codes: EmailCodesService,
         private readonly mail: MailService,
         private readonly config: ConfigService,
+        private readonly logger: LoggerService,
     ) {}
 
     private normalize(email: string) {
@@ -38,6 +40,15 @@ export class PasswordResetService {
 
         const code = Math.floor(100000 + Math.random() * 900000).toString();
         await this.codes.upsertPasswordResetCode(normalized, code);
+        await this.logger.log({
+            type: 'password_reset_request',
+            message: `Password reset requested for ${user.nick_name ?? user._id}`,
+            data: {
+                user: user._id,
+                user_nick: user.nick_name ?? null,
+                user_role: user.role ?? null,
+            },
+        });
         try {
             await this.mail.sendEmail({
                 to: user.email,
@@ -99,6 +110,16 @@ export class PasswordResetService {
         });
         await this.users.deleteSessions(String(user._id));
         await this.codes.delete(normalized, RESET_PURPOSE);
+        await this.logger.log({
+            type: 'password_reset',
+            message: `Password reset for ${user.nick_name ?? user._id}`,
+            data: {
+                user: user._id,
+                user_nick: user.nick_name ?? null,
+                user_role: user.role ?? null,
+                sessions_closed: true,
+            },
+        });
         if (user.email) {
             const settingsUrl = this.config.get<string>('FRONTEND_ORIGIN')
                 ? `${String(this.config.get('FRONTEND_ORIGIN')).replace(/\/$/, '')}/settings?tab=sessions`

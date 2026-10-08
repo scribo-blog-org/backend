@@ -5,6 +5,7 @@ const collections = {
     users: 'users',
     posts: 'posts',
     categories: 'categories',
+    conversations: 'conversations',
 };
 
 describe('escapeRegex', () => {
@@ -31,6 +32,7 @@ describe('entitiesPipeline', () => {
             'user:$data.target_nick',
             'post:$data.post_title',
             'category:$data.category_snapshot.name',
+            'conversation:$data.title',
         ]);
     });
 
@@ -65,7 +67,7 @@ describe('entitiesPipeline', () => {
             limit: 20,
         });
         const from = stage(pipeline, '$lookup').map((s: any) => s.$lookup.from);
-        expect(from).toEqual(['users', 'posts', 'categories']);
+        expect(from).toEqual(['users', 'posts', 'categories', 'conversations']);
         const facet = stage(pipeline, '$facet')[0] as any;
         expect(facet.$facet.items.slice(0, 2)).toEqual([
             { $skip: 40 },
@@ -124,6 +126,7 @@ describe('LogsQueryService.entities', () => {
             model('users'),
             model('posts'),
             model('categories'),
+            model('conversations'),
         );
 
         const result = await service.entities(
@@ -153,6 +156,7 @@ describe('LogsQueryService.entities', () => {
             model('users'),
             model('posts'),
             model('categories'),
+            model('conversations'),
         );
         await expect(
             service.entities({}, { id: 'a', role: 'user' } as never),
