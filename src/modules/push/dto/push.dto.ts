@@ -1,5 +1,10 @@
 import { Type } from 'class-transformer';
-import { IsNotEmptyObject, IsString, MaxLength, ValidateNested } from 'class-validator';
+import {
+    IsNotEmptyObject,
+    IsString,
+    MaxLength,
+    ValidateNested,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 class PushKeysDto {
