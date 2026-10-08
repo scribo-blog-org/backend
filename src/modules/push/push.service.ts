@@ -124,9 +124,19 @@ export class PushService {
             .find({ user: new Types.ObjectId(userId) })
             .lean();
         const body = JSON.stringify(payload);
+        const isDismiss = 'dismiss' in payload;
 
         await Promise.all(
             rows.map(async (row) => {
+                // iOS has to show a notification for every push and cannot
+                // reliably close it again, so a dismiss would only leave a
+                // blank notification there.
+                if (
+                    isDismiss &&
+                    /iPhone|iPad|iPod/i.test(row.user_agent ?? '')
+                ) {
+                    return;
+                }
                 try {
                     await webpush.sendNotification(
                         {
