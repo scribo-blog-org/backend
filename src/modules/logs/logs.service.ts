@@ -7,9 +7,31 @@ import { paginationMeta, parsePagination } from '../../http/pagination';
 import type { ListLogsQueryDto } from '../../http/query.dto';
 import { AppLog } from '../../database/schemas/log.schema';
 import { Category } from '../../database/schemas/category.schema';
+import { Conversation } from '../../database/schemas/conversation.schema';
 import { Post } from '../../database/schemas/post.schema';
 import { User } from '../../database/schemas/user.schema';
 import { entitiesPipeline, escapeRegex, toEntities } from './log-entities';
+
+const LEGACY_ERROR_TYPES = [
+    'server_error',
+    'backup_failed',
+    'backup_upload_failed',
+];
+
+export function levelFilter(level: 'info' | 'warn' | 'error' | 'problems') {
+    const legacyError = {
+        level: { $exists: false },
+        type: { $in: LEGACY_ERROR_TYPES },
+    };
+    const error = { $or: [{ level: 'error' }, legacyError] };
+    const problems = {
+        $or: [{ level: { $in: ['warn', 'error'] } }, legacyError],
+    };
+    if (level === 'error') return error;
+    if (level === 'warn') return { level: 'warn' };
+    if (level === 'problems') return problems;
+    return { $nor: [problems] };
+}
 
 @Injectable()
 export class LogsQueryService {
@@ -19,6 +41,8 @@ export class LogsQueryService {
         @InjectModel(Post.name) private readonly posts: Model<Post>,
         @InjectModel(Category.name)
         private readonly categories: Model<Category>,
+        @InjectModel(Conversation.name)
+        private readonly conversations: Model<Conversation>,
     ) {}
 
     private idMatch(path: string, value: string) {
@@ -50,6 +74,12 @@ export class LogsQueryService {
                 filter,
                 this.idMatch('data.category', query.category),
             );
+        if (query.conversation) {
+            const matches = ['data.conversation', 'data.conversations'].map(
+                (path) => this.idMatch(path, query.conversation!),
+            );
+            filter.$and = [{ $or: matches }];
+        }
         if (query.support_request)
             Object.assign(
                 filter,
@@ -62,6 +92,20 @@ export class LogsQueryService {
             ];
         }
         if (query.type) filter.type = query.type;
+        if (query.from || query.to) {
+            filter.date_time = {
+                ...(query.from && { $gte: new Date(query.from) }),
+                ...(query.to && { $lte: new Date(query.to) }),
+            };
+        }
+        if (query.level) {
+            const withLevel = levelFilter(query.level);
+            const { $and = [], ...rest } = filter as {
+                $and?: unknown[];
+            };
+            for (const key of Object.keys(filter)) delete filter[key];
+            filter.$and = [...$and, rest, withLevel];
+        }
         const total = await this.logs.countDocuments(filter);
         const items = await this.logs
             .find(filter)
@@ -98,6 +142,7 @@ export class LogsQueryService {
                     users: this.users.collection.name,
                     posts: this.posts.collection.name,
                     categories: this.categories.collection.name,
+                    conversations: this.conversations.collection.name,
                 },
                 skip,
                 limit,

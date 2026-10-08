@@ -25,6 +25,7 @@ import {
     actorFields,
     LoggerService,
     type LogActor,
+    type LogLevel,
 } from '../../infra/logger.service';
 import {
     Backup,
@@ -374,6 +375,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
                     `Backup failed (${trigger}): ${error}`,
                     author,
                     { trigger, backup: String(id), error },
+                    'error',
                 );
             } else {
                 const record = await this.findRecord(String(id));
@@ -410,10 +412,12 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         message: string,
         author: LogActor | undefined,
         data: Record<string, unknown>,
+        level?: LogLevel,
     ) {
         return this.logger.log({
             type,
             message,
+            level,
             data: {
                 ...(author ? actorFields(author) : { system: true }),
                 ...data,
@@ -503,7 +507,12 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
                     path.dirname(this.cfg.uploadsDir),
                     uploadsBase,
                 ],
-                { out: partial, accepted: tarAccepted },
+                {
+                    out: partial,
+                    accepted: tarAccepted,
+                    // macOS tar otherwise stores file metadata as extra "._*" entries
+                    env: { COPYFILE_DISABLE: '1' },
+                },
             );
             const { size } = await stat(partial);
             if (size === 0) throw new Error('The archive is empty');

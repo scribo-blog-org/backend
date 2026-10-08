@@ -3,6 +3,7 @@ import { Transform, Type } from 'class-transformer';
 import {
     IsIn,
     IsInt,
+    IsISO8601,
     IsOptional,
     IsString,
     Max,
@@ -161,12 +162,32 @@ export class ListLogsQueryDto extends PaginationQueryDto {
     @ApiPropertyOptional()
     @IsOptional()
     @IsString()
+    conversation?: string;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsString()
     role?: string;
 
     @ApiPropertyOptional()
     @IsOptional()
     @IsString()
     type?: string;
+
+    @ApiPropertyOptional({ enum: ['info', 'warn', 'error', 'problems'] })
+    @IsOptional()
+    @IsIn(['info', 'warn', 'error', 'problems'])
+    level?: 'info' | 'warn' | 'error' | 'problems';
+
+    @ApiPropertyOptional({ description: 'Only events at or after this time' })
+    @IsOptional()
+    @IsISO8601()
+    from?: string;
+
+    @ApiPropertyOptional({ description: 'Only events at or before this time' })
+    @IsOptional()
+    @IsISO8601()
+    to?: string;
 }
 
 export class ListLogEntitiesQueryDto extends PaginationQueryDto {

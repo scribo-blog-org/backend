@@ -10,6 +10,7 @@ export type RunOptions = {
     out?: string;
     accepted?: (code: number | null, stderr: string) => boolean;
     timeoutMs?: number;
+    env?: NodeJS.ProcessEnv;
 };
 
 export async function runProcess(
@@ -19,6 +20,7 @@ export async function runProcess(
 ): Promise<void> {
     const child = spawn(command, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
+        env: options.env ? { ...process.env, ...options.env } : process.env,
     });
     let tail = '';
     child.stderr.on('data', (chunk: Buffer) => {

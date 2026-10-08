@@ -91,4 +91,15 @@ export class SocketService {
                 );
             });
     }
+
+    adminSupportNew(count: number): void {
+        void this.socketEvents
+            .adminSupportNew(count)
+            .catch((error: unknown) => {
+                this.logger.error(
+                    'Failed to send new support requests to admins',
+                    error instanceof Error ? error.stack : error,
+                );
+            });
+    }
 }

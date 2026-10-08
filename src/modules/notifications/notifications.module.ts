@@ -6,9 +6,10 @@ import { NotificationsService } from './notifications.service';
 import { MentionNotificationsService } from './mention-notifications.service';
 
 import { SocketModule } from '../../socket/socket.module';
+import { PushModule } from '../push/push.module';
 
 @Module({
-    imports: [DatabaseModule, SocketModule],
+    imports: [DatabaseModule, SocketModule, PushModule],
 
     providers: [NotificationsService, MentionNotificationsService],
 

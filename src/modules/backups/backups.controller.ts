@@ -86,10 +86,16 @@ export class BackupsController {
     ) {
         const author = await this.author(actor);
         const data = await this.restores.start(id, actor.id, author);
-        await this.logger.action('backup_restore', author, {
-            backup: data.backup_id,
-            file_name: data.file_name,
-        });
+        await this.logger.action(
+            'backup_restore',
+            author,
+            {
+                backup: data.backup_id,
+                file_name: data.file_name,
+            },
+            undefined,
+            'warn',
+        );
         return { status: true, message: 'Restore started', data };
     }
 
@@ -136,11 +142,18 @@ export class BackupsController {
                 data,
             };
         } catch (error) {
-            await this.logger.action('backup_upload_failed', author, {
-                original_name: file.originalname,
-                size_bytes: file.size,
-                error: error instanceof Error ? error.message : String(error),
-            });
+            await this.logger.action(
+                'backup_upload_failed',
+                author,
+                {
+                    original_name: file.originalname,
+                    size_bytes: file.size,
+                    error:
+                        error instanceof Error ? error.message : String(error),
+                },
+                undefined,
+                'error',
+            );
             throw error;
         } finally {
             await rm(file.path, { force: true });
