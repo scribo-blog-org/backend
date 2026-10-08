@@ -298,6 +298,9 @@ export class CommentsService {
                 comment_text: textPreview(root.comment_text),
                 comment_author: String(root.author),
                 removed: ids.length,
+                ...(isResourceOwner(root.author, actor.id)
+                    ? {}
+                    : { moderation: true }),
             },
             `User ${actor.nick_name} deleted comment ${commentId}`,
         );

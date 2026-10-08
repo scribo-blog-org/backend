@@ -836,6 +836,11 @@ export class ChatService {
             await this.conversations.findByIdAndUpdate(conversation._id, {
                 $set: update,
             });
+            await this.logger.action('update_group', actor, {
+                conversation: String(conversation._id),
+                title: update.title ?? conversation.title ?? null,
+                fields: Object.keys(update),
+            });
             await this.addSystemMessage(
                 conversation,
                 actor.id,
@@ -863,6 +868,12 @@ export class ChatService {
             );
         }
         await this.insertGroupMember(conversation, userId);
+        await this.logger.action('add_group_member', actor, {
+            conversation: String(conversation._id),
+            title: conversation.title ?? null,
+            target_user: userId,
+            target_nick: await this.memberNick(userId),
+        });
 
         const reloaded = await this.reloadConversation(
             String(conversation._id),
@@ -913,6 +924,10 @@ export class ChatService {
         }
 
         await this.insertGroupMember(conversation, actor.id);
+        await this.logger.action('join_group', actor, {
+            conversation: String(conversation._id),
+            title: conversation.title ?? null,
+        });
 
         const reloaded = await this.reloadConversation(
             String(conversation._id),
@@ -999,6 +1014,18 @@ export class ChatService {
             $unset: { [`last_read_at.${userId}`]: '' },
         });
 
+        await this.logger.action(
+            userId === actor.id ? 'leave_group' : 'remove_group_member',
+            actor,
+            {
+                conversation: id,
+                title: conversation.title ?? null,
+                ...(userId === actor.id
+                    ? {}
+                    : { target_user: userId, target_nick: targetNick }),
+            },
+        );
+
         this.socketService.chatConversationDeleted(userId, id);
         await this.pushUnread(userId);
         const stayIds = this.participantIds(conversation).filter(
@@ -1062,6 +1089,14 @@ export class ChatService {
 
         const actorNick = await this.actorNick(actor);
         const targetNick = await this.memberNick(userId);
+        await this.logger.action('update_group_member_role', actor, {
+            conversation: String(conversation._id),
+            title: conversation.title ?? null,
+            target_user: userId,
+            target_nick: targetNick,
+            previous_member_role: current,
+            member_role: role,
+        });
         await this.addSystemMessage(
             conversation,
             actor.id,
@@ -1340,6 +1375,12 @@ export class ChatService {
             );
         }
 
+        await this.logger.action('delete_message', actor, {
+            conversation: String(message.conversation_id),
+            message_author: String(message.sender_id),
+            own_message: String(message.sender_id) === actor.id,
+        });
+
         const updated = await this.messages
             .findById(messageId)
             .populate('sender_id', '_id nick_name avatar')
@@ -1399,6 +1440,10 @@ export class ChatService {
             { _id: { $in: objectIds } },
             { $set: { deleted_at: deletedAt } },
         );
+        await this.logger.action('delete_messages', actor, {
+            conversations: conversationIds,
+            count: rows.length,
+        });
 
         for (const [conversationId, conversation] of conversations) {
             const removedLast = rows.some(
@@ -1521,6 +1566,10 @@ export class ChatService {
         const encrypted = this.crypto.encrypt(text);
         await this.messages.findByIdAndUpdate(messageId, {
             $set: { text: encrypted, edited_at: editedAt },
+        });
+        await this.logger.action('edit_message', actor, {
+            conversation: String(message.conversation_id),
+            text_length: text.length,
         });
 
         const conversationUpdate: Record<string, unknown> = {};

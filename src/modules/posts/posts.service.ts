@@ -408,6 +408,12 @@ export class PostsService {
                             : (oldCategory ?? undefined),
                     ),
                     changes,
+                    ...(isResourceOwner(post.author, actor.id)
+                        ? {}
+                        : {
+                              moderation: true,
+                              post_author: String(post.author),
+                          }),
                 },
                 `User ${actor.nick_name} updated post ${post._id}`,
             );
@@ -478,6 +484,9 @@ export class PostsService {
                 comments_removed: commentIds.length,
                 likes_count: (result.likes ?? []).length,
                 views_count: result.views_count ?? 0,
+                ...(isResourceOwner(result.author, actor.id)
+                    ? {}
+                    : { moderation: true }),
             },
             `User ${actor.nick_name} deleted post ${id}`,
         );

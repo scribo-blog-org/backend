@@ -220,5 +220,6 @@ export class ProfileService {
         await this.users.updateById(actor.id, {
             password: setPasswordHash(input.newPassword),
         });
+        await this.logger.action('password_change', actor);
     }
 }

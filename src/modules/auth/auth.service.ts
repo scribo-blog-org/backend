@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { fieldError } from '../../http/http-errors';
+import { LoggerService } from '../../infra/logger.service';
 import { UsersService } from '../users/users.service';
 import { comparePassword } from './password';
 import { SessionService } from './session.service';
@@ -14,7 +15,24 @@ export class AuthService {
     constructor(
         private readonly users: UsersService,
         private readonly sessions: SessionService,
+        private readonly logger: LoggerService,
     ) {}
+
+    private async logLogin(
+        user: { _id: unknown; nick_name?: string; role?: string },
+        method: 'password' | 'google',
+    ) {
+        await this.logger.log({
+            type: 'login',
+            message: `User ${user.nick_name ?? user._id} logged in`,
+            data: {
+                user: user._id,
+                user_nick: user.nick_name ?? null,
+                user_role: user.role ?? null,
+                method,
+            },
+        });
+    }
 
     async emailFromGoogleToken(googleToken: string) {
         const response = await fetch(
@@ -78,7 +96,9 @@ export class AuthService {
         }
 
         const { password: _password, ...safeUser } = user;
-        return this.sessions.issueSession(safeUser as never, req);
+        const tokens = await this.sessions.issueSession(safeUser as never, req);
+        await this.logLogin(user, 'password');
+        return tokens;
     }
 
     async loginByGoogle(googleToken: string, req: Request) {
@@ -90,6 +110,8 @@ export class AuthService {
         if (!user) {
             throw new NotFoundException('User with this email is not found');
         }
-        return this.sessions.issueSession(user as never, req);
+        const tokens = await this.sessions.issueSession(user as never, req);
+        await this.logLogin(user, 'google');
+        return tokens;
     }
 }

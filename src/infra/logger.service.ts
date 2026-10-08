@@ -11,6 +11,8 @@ export type LogActor = {
     avatar?: string | null;
 };
 
+export type LogLevel = 'info' | 'warn' | 'error';
+
 export const actorFields = (actor: LogActor) => ({
     user: actor.id,
     user_nick: actor.nick_name ?? null,
@@ -35,6 +37,7 @@ export class LoggerService {
     async log(input: {
         type: string;
         message: string;
+        level?: LogLevel;
         data?: Record<string, unknown> | null;
     }) {
         if (
@@ -48,6 +51,7 @@ export class LoggerService {
             await this.logs.create({
                 type: input.type,
                 message: input.message,
+                level: input.level ?? 'info',
                 data: {
                     ...(request ? { request } : {}),
                     ...(input.data ?? {}),
@@ -63,10 +67,12 @@ export class LoggerService {
         actor: LogActor,
         data: Record<string, unknown> = {},
         message?: string,
+        level?: LogLevel,
     ) {
         return this.log({
             type,
             message: message ?? `User ${actor.nick_name ?? actor.id}: ${type}`,
+            level,
             data: {
                 ...actorFields(actor),
                 ...data,
@@ -74,8 +80,18 @@ export class LoggerService {
         });
     }
 
-    system(type: string, message: string, data: Record<string, unknown> = {}) {
-        return this.log({ type, message, data: { system: true, ...data } });
+    system(
+        type: string,
+        message: string,
+        data: Record<string, unknown> = {},
+        level?: LogLevel,
+    ) {
+        return this.log({
+            type,
+            message,
+            level,
+            data: { system: true, ...data },
+        });
     }
 
     async error(input: {
@@ -115,6 +131,7 @@ export class LoggerService {
                     : null,
                 ...(input.user ? { user: input.user } : {}),
             },
+            'error',
         );
     }
 }
