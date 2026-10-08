@@ -109,7 +109,13 @@ export async function verifyArchive(opts: VerifyOptions): Promise<Manifest> {
     checkLayout(entries, manifest);
 
     await mkdir(opts.work, { recursive: true, mode: 0o700 });
-    await runProcess(opts.tar, ['-xf', opts.file, '-C', opts.work]);
+    await runProcess(opts.tar, [
+        '--exclude=._*',
+        '-xf',
+        opts.file,
+        '-C',
+        opts.work,
+    ]);
 
     const dump = path.join(opts.work, MONGO_ARCHIVE);
     const dumpSize = await stat(dump)

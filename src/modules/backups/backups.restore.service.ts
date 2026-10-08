@@ -253,6 +253,7 @@ export class BackupRestoreService implements OnModuleInit {
                 message: error
                     ? `Restore of ${job.file_name} failed${job.rolled_back ? ' (rolled back)' : ''}: ${error}`
                     : `Restore of ${job.file_name} finished`,
+                level: error ? 'error' : 'info',
                 data: {
                     ...(author
                         ? actorFields(author)
