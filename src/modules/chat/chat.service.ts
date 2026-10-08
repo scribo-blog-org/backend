@@ -1302,7 +1302,7 @@ export class ChatService {
                             body: isGroup
                                 ? `${senderName}: ${preview}`
                                 : preview,
-                            url: `/chats/${String(conversation._id)}`,
+                            url: `/messages/${String(conversation._id)}`,
                             tag: `chat:${String(conversation._id)}`,
                             icon: senderAvatar,
                         })
