@@ -22,6 +22,7 @@ import {
 import { User } from '../../database/schemas/user.schema';
 import { FilesService } from '../../files/files.service';
 import { SocketService } from '../../socket/socket.service';
+import { PushService } from '../push/push.service';
 import { UsersService } from '../users/users.service';
 import { ChatCrypto } from './chat-crypto';
 import { chatStartedEmailTemplate } from './chat-started-email';
@@ -80,6 +81,7 @@ export class ChatService {
         @InjectModel(User.name) private readonly users: Model<User>,
         private readonly usersService: UsersService,
         private readonly socketService: SocketService,
+        private readonly push: PushService,
         private readonly files: FilesService,
         private readonly mail: MailService,
         private readonly config: ConfigService,
@@ -1245,6 +1247,32 @@ export class ChatService {
             participantIds
                 .filter((participantId) => participantId !== actor.id)
                 .map((participantId) => this.pushUnread(participantId)),
+        );
+
+        const preview = text.length > 140 ? `${text.slice(0, 140)}…` : text;
+        const isGroup = conversation.kind === 'group';
+        const senderName = actor.nick_name || 'Someone';
+        const senderAvatar = this.push.avatarUrl(
+            (populated?.sender_id as { avatar?: string } | undefined)?.avatar,
+        );
+        await Promise.all(
+            participantIds
+                .filter((participantId) => participantId !== actor.id)
+                .map((participantId) =>
+                    this.push
+                        .sendToUser(participantId, {
+                            title: isGroup
+                                ? conversation.title || 'Group chat'
+                                : senderName,
+                            body: isGroup
+                                ? `${senderName}: ${preview}`
+                                : preview,
+                            url: `/chats/${String(conversation._id)}`,
+                            tag: `chat:${String(conversation._id)}`,
+                            icon: senderAvatar,
+                        })
+                        .catch(() => undefined),
+                ),
         );
 
         return payload;

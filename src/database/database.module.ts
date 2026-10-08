@@ -42,6 +42,10 @@ import {
 } from './schemas/conversation.schema';
 import { ChatMessage, ChatMessageSchema } from './schemas/chat-message.schema';
 import { Backup, BackupSchema } from './schemas/backup.schema';
+import {
+    PushSubscription,
+    PushSubscriptionSchema,
+} from './schemas/push-subscription.schema';
 
 @Module({
     imports: [
@@ -88,6 +92,7 @@ import { Backup, BackupSchema } from './schemas/backup.schema';
             { name: Conversation.name, schema: ConversationSchema },
             { name: ChatMessage.name, schema: ChatMessageSchema },
             { name: Backup.name, schema: BackupSchema },
+            { name: PushSubscription.name, schema: PushSubscriptionSchema },
         ]),
     ],
     exports: [MongooseModule],

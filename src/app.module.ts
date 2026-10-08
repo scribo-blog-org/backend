@@ -21,6 +21,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { ChatModule } from './modules/chat/chat.module';
 import { LinkPreviewModule } from './modules/link-preview/link-preview.module';
 import { BackupsModule } from './modules/backups/backups.module';
+import { PushModule } from './modules/push/push.module';
 import { publicKeyPem } from './config/jwt-keys';
 @Module({
     imports: [
@@ -53,6 +54,7 @@ import { publicKeyPem } from './config/jwt-keys';
         ChatModule,
         LinkPreviewModule,
         BackupsModule,
+        PushModule,
     ],
     controllers: [AppController],
     providers: [{ provide: APP_INTERCEPTOR, useClass: ApiEnvelopeInterceptor }],
