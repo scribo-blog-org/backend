@@ -1680,11 +1680,22 @@ export class ChatService {
             conversation_id: conversation._id,
         });
         await this.conversations.findByIdAndDelete(conversation._id);
-        await this.logger.action('delete_conversation', actor, {
-            target_user: otherId ?? null,
-            target_nick: other?.nick_name ?? null,
-            conversation: conversationId,
-        });
+        await this.logger.action(
+            'delete_conversation',
+            actor,
+            this.isGroup(conversation)
+                ? {
+                      conversation: conversationId,
+                      title: conversation.title ?? null,
+                      group: true,
+                      members: participantIds.length,
+                  }
+                : {
+                      target_user: otherId ?? null,
+                      target_nick: other?.nick_name ?? null,
+                      conversation: conversationId,
+                  },
+        );
 
         for (const userId of participantIds) {
             this.socketService.chatConversationDeleted(userId, conversationId);
