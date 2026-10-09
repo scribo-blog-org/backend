@@ -35,7 +35,6 @@ const HEALTH_TYPES = [
     'server_error',
     'slow_request',
     'rate_limited',
-    'access_denied',
     'external_failed',
 ];
 const DAY_MS = 24 * 60 * 60 * 1000;
