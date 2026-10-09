@@ -11,6 +11,7 @@ import type { Actor } from '../../authz/policy';
 import { ConfigService } from '@nestjs/config';
 import { parseDevice } from '../../visitor/device';
 import { clientIp, formatLocation, lookupVisitorGeo } from '../../visitor/geo';
+import { LoggerService } from '../../infra/logger.service';
 import { MailService } from '../../infra/mail.service';
 import { Session } from '../../database/schemas/session.schema';
 import { REFRESH_TTL_MS } from '../../database/schemas/session.schema';
@@ -28,6 +29,7 @@ export class SessionService implements OnModuleInit {
         private readonly users: UsersService,
         private readonly mail: MailService,
         private readonly config: ConfigService,
+        private readonly logger: LoggerService,
     ) {}
 
     async onModuleInit() {
@@ -170,6 +172,9 @@ export class SessionService implements OnModuleInit {
         if (access?.sessionId) sessionIds.add(String(access.sessionId));
         for (const sessionId of sessionIds) {
             await this.sessions.findByIdAndDelete(sessionId);
+        }
+        if (actor) {
+            await this.logger.action('logout', actor, {}, undefined);
         }
     }
 
