@@ -26,6 +26,8 @@ import {
     VisitPlace,
     VisitUser,
 } from '../../database/schemas/visit-bucket.schema';
+import { buildInfo } from '../../infra/build-info';
+import { appVersion } from '../backups/manifest';
 import { RequestMetricsService } from './request-metrics.service';
 
 const DEDUPE_SECONDS = 8;
@@ -601,6 +603,11 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
                 unique_authorized: uniqueUsers,
             },
             places,
+            app: {
+                version: appVersion(),
+                sha: buildInfo().sha_short,
+                started_at: new Date(Date.now() - process.uptime() * 1000),
+            },
             health,
             timings: {
                 ...timings.overall,
