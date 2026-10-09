@@ -24,7 +24,13 @@ function isLocalBrowserOrigin(origin: string): boolean {
         const url = new URL(origin);
         return (
             url.protocol === 'http:' &&
-            (url.hostname === 'localhost' || url.hostname === '127.0.0.1')
+            (url.hostname === 'localhost' ||
+                url.hostname === '127.0.0.1' ||
+                // A phone on the same network opens the dev frontend by the
+                // machine's private address.
+                /^(192\.168|10)\.\d{1,3}\.\d{1,3}(\.\d{1,3})?$/.test(
+                    url.hostname,
+                ))
         );
     } catch {
         return false;
