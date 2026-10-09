@@ -14,12 +14,6 @@ export type PushPayload = {
     icon?: string;
 };
 
-export type DismissPayload = {
-    dismiss: true;
-    tag?: string;
-    tagPrefix?: string;
-};
-
 export type SubscriptionInput = {
     endpoint: string;
     keys: { p256dh: string; auth: string };
@@ -108,50 +102,16 @@ export class PushService {
         );
     }
 
-    // Asks every device of the user to close notifications that are already
-    // on screen, e.g. after the chat or the notification list was read.
-    async dismissForUser(
-        userId: string,
-        target: { tag?: string; tagPrefix?: string },
-    ) {
-        await this.sendToUser(userId, { dismiss: true, ...target });
-    }
-
-    async sendToUser(userId: string, payload: PushPayload | DismissPayload) {
+    async sendToUser(userId: string, payload: PushPayload) {
         if (!this.enabled) return;
 
         const rows = await this.subscriptions
             .find({ user: new Types.ObjectId(userId) })
             .lean();
         const body = JSON.stringify(payload);
-        const isDismiss = 'dismiss' in payload;
 
         await Promise.all(
             rows.map(async (row) => {
-                const matching = isDismiss
-                    ? (row.shown_tags ?? []).filter((tag) =>
-                          payload.tag
-                              ? tag === payload.tag
-                              : payload.tagPrefix
-                                ? tag.startsWith(payload.tagPrefix)
-                                : false,
-                      )
-                    : [];
-
-                // Every push has to end in a visible notification, so a
-                // dismiss sent to a device with nothing to close would only
-                // flash a blank one. iOS also cannot reliably close a
-                // notification again, so it never gets a dismiss.
-                if (
-                    isDismiss &&
-                    (!matching.length ||
-                        /iPhone|iPad|iPod/i.test(row.user_agent ?? ''))
-                ) {
-                    if (matching.length) {
-                        await this.forgetTags(row._id, matching);
-                    }
-                    return;
-                }
                 try {
                     await webpush.sendNotification(
                         {
@@ -161,14 +121,6 @@ export class PushService {
                         body,
                         { TTL: 60 * 60 * 24 },
                     );
-                    if (isDismiss) {
-                        await this.forgetTags(row._id, matching);
-                    } else if (payload.tag) {
-                        await this.subscriptions.updateOne(
-                            { _id: row._id },
-                            { $addToSet: { shown_tags: payload.tag } },
-                        );
-                    }
                 } catch (error: unknown) {
                     const status = (error as { statusCode?: number })
                         .statusCode;
@@ -183,13 +135,6 @@ export class PushService {
                     );
                 }
             }),
-        );
-    }
-
-    private async forgetTags(id: Types.ObjectId, tags: string[]) {
-        await this.subscriptions.updateOne(
-            { _id: id },
-            { $pull: { shown_tags: { $in: tags } } },
         );
     }
 }

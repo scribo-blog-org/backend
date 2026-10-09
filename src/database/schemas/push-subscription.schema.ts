@@ -19,11 +19,6 @@ export class PushSubscription {
 
     @Prop()
     user_agent?: string;
-
-    // Tags of notifications pushed to this device and not yet dismissed, so a
-    // dismiss is only sent where there is something on screen to close.
-    @Prop({ type: [String], default: [] })
-    shown_tags?: string[];
 }
 
 export const PushSubscriptionSchema =
