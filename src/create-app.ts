@@ -10,6 +10,7 @@ import {
     uploadsDir,
 } from './files/files.config';
 import { ApiExceptionFilter } from './http/api-exception.filter';
+import { onSlowQuery } from './database/db-timing.plugin';
 import { LoggerService } from './infra/logger.service';
 import {
     requestContextMiddleware,
@@ -24,7 +25,13 @@ function isLocalBrowserOrigin(origin: string): boolean {
         const url = new URL(origin);
         return (
             url.protocol === 'http:' &&
-            (url.hostname === 'localhost' || url.hostname === '127.0.0.1')
+            (url.hostname === 'localhost' ||
+                url.hostname === '127.0.0.1' ||
+                // A phone on the same network opens the dev frontend by the
+                // machine's private address.
+                /^(192\.168|10)\.\d{1,3}\.\d{1,3}(\.\d{1,3})?$/.test(
+                    url.hostname,
+                ))
         );
     } catch {
         return false;
@@ -68,8 +75,15 @@ export async function configureScriboApp(
     app.use(cookieParser());
     app.use(requestContextMiddleware);
     const metrics = metricsOf(app);
-    if (metrics) {
-        app.use(requestTimingMiddleware((sample) => metrics.record(sample)));
+    const logger = loggerOf(app);
+    onSlowQuery(logger ? (query) => void logger.slowQuery(query) : undefined);
+    if (metrics || logger) {
+        app.use(
+            requestTimingMiddleware((sample) => {
+                metrics?.record(sample);
+                void logger?.slowRequest(sample);
+            }),
+        );
     }
     if (backendServesUploads(process.env)) {
         (app as NestExpressApplication).useStaticAssets(
@@ -90,7 +104,7 @@ export async function configureScriboApp(
         );
     }
     app.useGlobalPipes(new ScriboValidationPipe());
-    app.useGlobalFilters(new ApiExceptionFilter(loggerOf(app)));
+    app.useGlobalFilters(new ApiExceptionFilter(logger));
     app.enableCors({
         origin: (
             requestOrigin: string | undefined,
@@ -108,8 +122,8 @@ export async function configureScriboApp(
         },
         credentials: true,
         methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-        allowedHeaders: ['Content-Type', 'Authorization'],
-        exposedHeaders: ['Set-Cookie', 'Content-Disposition'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
+        exposedHeaders: ['Set-Cookie', 'Content-Disposition', 'X-Request-Id'],
         optionsSuccessStatus: 200,
     });
 

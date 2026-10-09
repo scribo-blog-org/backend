@@ -164,7 +164,7 @@ describe('request context in the log', () => {
 
         await logger.system('outside', 'no request here');
         await new Promise<void>((resolve) =>
-            requestContextMiddleware(req(), {} as never, () => {
+            requestContextMiddleware(req(), { setHeader() {} } as never, () => {
                 void logger
                     .action(
                         'like_post',
@@ -183,6 +183,57 @@ describe('request context in the log', () => {
         expect(created[1].data).toMatchObject({
             user_role: 'author',
             post: 'p',
+        });
+    });
+});
+
+describe('LoggerService diagnostics', () => {
+    const base = { type: 'login_failed', message: 'Failed sign-in', key: 'k' };
+
+    it('writes one row per key per window and counts the skipped repeats', async () => {
+        const { logger, created } = setup();
+        const now = jest.spyOn(Date, 'now').mockReturnValue(1_000_000);
+        await logger.diagnostic(base);
+        await logger.diagnostic(base);
+        await logger.diagnostic(base);
+        expect(created).toHaveLength(1);
+        expect(created[0].level).toBe('warn');
+
+        now.mockReturnValue(1_000_000 + 31_000);
+        await logger.diagnostic(base);
+        expect(created).toHaveLength(2);
+        expect(created[1].data.repeats).toBe(2);
+    });
+
+    it('keeps different keys apart', async () => {
+        const { logger, created } = setup();
+        await logger.diagnostic(base);
+        await logger.diagnostic({ ...base, key: 'other' });
+        expect(created).toHaveLength(2);
+    });
+
+    it('ignores requests faster than the threshold and unmatched routes', async () => {
+        const { logger, created } = setup();
+        const sample = {
+            route: 'GET /api/posts',
+            status: 200,
+            total_ms: 1500,
+            db_ms: 900,
+            db_queries: 42,
+            user: 'u1',
+            method: 'GET',
+            path: '/api/posts',
+            request_id: 'r1',
+        };
+        await logger.slowRequest({ ...sample, total_ms: 200 });
+        await logger.slowRequest({ ...sample, route: 'GET (no route)' });
+        await logger.slowRequest({ ...sample, route: 'POST /api/backups/run' });
+        expect(created).toHaveLength(0);
+
+        await logger.slowRequest(sample);
+        expect(created[0]).toMatchObject({
+            type: 'slow_request',
+            data: { db_queries: 42, db_ms: 900, total_ms: 1500, user: 'u1' },
         });
     });
 });

@@ -466,7 +466,6 @@ export class UsersService implements OnModuleInit {
     }
 
     async markNotificationsRead(id: string) {
-        void this.notificationsService.dismissPushNotifications(id);
         return this.users
             .findByIdAndUpdate(
                 id,

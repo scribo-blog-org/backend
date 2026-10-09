@@ -1,3 +1,4 @@
+import { buildInfo } from '../../infra/build-info';
 import {
     ConflictException,
     Injectable,
@@ -142,6 +143,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
             keep_months: this.cfg.keepMonths,
             db_name: this.connection.name,
             app_version: appVersion(),
+            app_sha: buildInfo().sha_short,
             db_version: this.currentDbVersion(),
             upload_enabled: this.cfg.restoreEnabled,
             upload_max_bytes: this.cfg.uploadMaxBytes,

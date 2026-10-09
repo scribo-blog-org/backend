@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { LoggerService } from '../../infra/logger.service';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -12,12 +13,6 @@ export type PushPayload = {
     url: string;
     tag?: string;
     icon?: string;
-};
-
-export type DismissPayload = {
-    dismiss: true;
-    tag?: string;
-    tagPrefix?: string;
 };
 
 export type SubscriptionInput = {
@@ -36,6 +31,7 @@ export class PushService {
         @InjectModel(PushSubscription.name)
         private readonly subscriptions: Model<PushSubscription>,
         config: ConfigService,
+        private readonly appLogger: LoggerService,
     ) {
         this.origin = (
             config.get<string>('API_ORIGIN')?.trim() ||
@@ -108,35 +104,16 @@ export class PushService {
         );
     }
 
-    // Asks every device of the user to close notifications that are already
-    // on screen, e.g. after the chat or the notification list was read.
-    async dismissForUser(
-        userId: string,
-        target: { tag?: string; tagPrefix?: string },
-    ) {
-        await this.sendToUser(userId, { dismiss: true, ...target });
-    }
-
-    async sendToUser(userId: string, payload: PushPayload | DismissPayload) {
+    async sendToUser(userId: string, payload: PushPayload) {
         if (!this.enabled) return;
 
         const rows = await this.subscriptions
             .find({ user: new Types.ObjectId(userId) })
             .lean();
         const body = JSON.stringify(payload);
-        const isDismiss = 'dismiss' in payload;
 
         await Promise.all(
             rows.map(async (row) => {
-                // iOS has to show a notification for every push and cannot
-                // reliably close it again, so a dismiss would only leave a
-                // blank notification there.
-                if (
-                    isDismiss &&
-                    /iPhone|iPad|iPod/i.test(row.user_agent ?? '')
-                ) {
-                    return;
-                }
                 try {
                     await webpush.sendNotification(
                         {
@@ -153,6 +130,7 @@ export class PushService {
                         await this.subscriptions.deleteOne({ _id: row._id });
                         return;
                     }
+                    void this.appLogger.externalFailed('push', error);
                     this.logger.warn(
                         `Push to ${userId} failed: ${
                             error instanceof Error ? error.message : error

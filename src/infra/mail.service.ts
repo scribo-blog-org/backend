@@ -1,12 +1,16 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import nodemailer from 'nodemailer';
+import { LoggerService } from './logger.service';
 
 @Injectable()
 export class MailService {
     private readonly transporter;
 
-    constructor(private readonly config: ConfigService) {
+    constructor(
+        private readonly config: ConfigService,
+        private readonly logger: LoggerService,
+    ) {
         this.transporter = nodemailer.createTransport({
             service: 'gmail',
             auth: {
@@ -35,7 +39,8 @@ export class MailService {
                 subject,
                 html: htmlContent,
             });
-        } catch {
+        } catch (error) {
+            void this.logger.externalFailed('mail', error);
             throw new InternalServerErrorException('Failed to send email!');
         }
     }

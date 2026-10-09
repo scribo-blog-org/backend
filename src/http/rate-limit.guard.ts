@@ -17,6 +17,15 @@ export type RateLimitRule = {
     by?: 'ip' | 'email' | 'user';
 };
 
+export class RateLimitedException extends HttpException {
+    constructor(readonly rule: string) {
+        super(
+            'Too many requests. Try again later.',
+            HttpStatus.TOO_MANY_REQUESTS,
+        );
+    }
+}
+
 export const RATE_LIMITS_KEY = 'rate_limits';
 
 export const RateLimits = (...rules: RateLimitRule[]) =>
@@ -90,10 +99,7 @@ export class RateLimitGuard implements CanActivate {
                       ? `${rule.name}:user:${userId || ip}`
                       : `${rule.name}:ip:${ip}`;
             if (!consume(key, rule.windowMs, rule.max)) {
-                throw new HttpException(
-                    'Too many requests. Try again later.',
-                    HttpStatus.TOO_MANY_REQUESTS,
-                );
+                throw new RateLimitedException(rule.name);
             }
         }
         return true;

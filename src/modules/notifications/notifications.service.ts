@@ -45,12 +45,6 @@ export class NotificationsService {
         }
     }
 
-    async dismissPushNotifications(userId: string) {
-        await this.push
-            .dismissForUser(userId, { tagPrefix: 'notification:' })
-            .catch(() => undefined);
-    }
-
     private async pushNotification(
         userId: string,
         notification: CreateNotification,

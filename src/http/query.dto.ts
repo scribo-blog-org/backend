@@ -174,6 +174,12 @@ export class ListLogsQueryDto extends PaginationQueryDto {
     @IsString()
     type?: string;
 
+    @ApiPropertyOptional({ description: 'Every event of one request' })
+    @IsOptional()
+    @IsString()
+    @MaxLength(64)
+    request?: string;
+
     @ApiPropertyOptional({ enum: ['info', 'warn', 'error', 'problems'] })
     @IsOptional()
     @IsIn(['info', 'warn', 'error', 'problems'])

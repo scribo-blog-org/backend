@@ -6,9 +6,11 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import type { RequestSample } from '../../infra/request-context';
 import { RequestMetricHour } from '../../database/schemas/request-metric.schema';
 import {
     LATENCY_BUCKETS,
+    describeLoad,
     describeTimings,
     isTrackedRoute,
     latencyBucket,
@@ -26,6 +28,9 @@ type Pending = {
     db_ms: number;
     max_ms: number;
     histogram: number[];
+    queries: number;
+    errors: number;
+    client_errors: number;
 };
 
 type StoredRow = {
@@ -35,6 +40,9 @@ type StoredRow = {
     total_ms: number;
     db_ms: number;
     max_ms: number;
+    queries?: number;
+    errors?: number;
+    client_errors?: number;
     h?: Record<string, number>;
 };
 
@@ -62,7 +70,10 @@ export class RequestMetricsService implements OnModuleInit, OnModuleDestroy {
         await this.flush();
     }
 
-    record(sample: { route: string; total_ms: number; db_ms: number }) {
+    record(
+        sample: Pick<RequestSample, 'route' | 'total_ms' | 'db_ms'> &
+            Partial<Pick<RequestSample, 'status' | 'db_queries'>>,
+    ) {
         if (!isTrackedRoute(sample.route)) return;
 
         const hour = new Date().toISOString().slice(0, 13);
@@ -78,6 +89,9 @@ export class RequestMetricsService implements OnModuleInit, OnModuleDestroy {
                 db_ms: 0,
                 max_ms: 0,
                 histogram: new Array<number>(LATENCY_BUCKETS).fill(0),
+                queries: 0,
+                errors: 0,
+                client_errors: 0,
             };
             this.pending.set(key, entry);
         }
@@ -87,6 +101,9 @@ export class RequestMetricsService implements OnModuleInit, OnModuleDestroy {
         entry.db_ms += Math.min(sample.db_ms, sample.total_ms);
         entry.max_ms = Math.max(entry.max_ms, sample.total_ms);
         entry.histogram[latencyBucket(sample.total_ms)] += 1;
+        entry.queries += sample.db_queries ?? 0;
+        if ((sample.status ?? 0) >= 500) entry.errors += 1;
+        else if ((sample.status ?? 0) >= 400) entry.client_errors += 1;
     }
 
     async flush() {
@@ -101,6 +118,9 @@ export class RequestMetricsService implements OnModuleInit, OnModuleDestroy {
                         count: entry.count,
                         total_ms: entry.total_ms,
                         db_ms: entry.db_ms,
+                        queries: entry.queries,
+                        errors: entry.errors,
+                        client_errors: entry.client_errors,
                     };
                     entry.histogram.forEach((value, index) => {
                         if (value) inc[`h.${index}`] = value;
@@ -145,6 +165,9 @@ export class RequestMetricsService implements OnModuleInit, OnModuleDestroy {
                 db_ms: row.db_ms,
                 max_ms: row.max_ms,
                 histogram: histogramOf(row),
+                queries: row.queries ?? 0,
+                errors: row.errors ?? 0,
+                client_errors: row.client_errors ?? 0,
             };
 
             const existing = byRoute.get(row.route);
@@ -153,6 +176,11 @@ export class RequestMetricsService implements OnModuleInit, OnModuleDestroy {
                 existing.total_ms += totals.total_ms;
                 existing.db_ms += totals.db_ms;
                 existing.max_ms = Math.max(existing.max_ms, totals.max_ms);
+                existing.queries =
+                    (existing.queries ?? 0) + (totals.queries ?? 0);
+                existing.errors = (existing.errors ?? 0) + (totals.errors ?? 0);
+                existing.client_errors =
+                    (existing.client_errors ?? 0) + (totals.client_errors ?? 0);
                 existing.histogram = existing.histogram.map(
                     (value, index) => value + totals.histogram[index],
                 );
@@ -176,6 +204,41 @@ export class RequestMetricsService implements OnModuleInit, OnModuleDestroy {
             .sort((a, b) => b.avg_ms - a.avg_ms)
             .slice(0, 8);
 
+        const heaviest = routes
+            .map((route) => ({
+                route: route.route,
+                ...describeLoad([route]),
+                ...describeTimings([route]),
+            }))
+            .sort((a, b) => b.total_ms - a.total_ms)
+            .slice(0, 8);
+        const chatty = routes
+            .filter((route) => route.count >= 3 && (route.queries ?? 0) > 0)
+            .map((route) => ({
+                route: route.route,
+                ...describeLoad([route]),
+                ...describeTimings([route]),
+            }))
+            .sort((a, b) => b.queries_avg - a.queries_avg)
+            .slice(0, 8);
+        const failing = routes
+            .filter(
+                (route) => (route.errors ?? 0) + (route.client_errors ?? 0) > 0,
+            )
+            .map((route) => ({
+                route: route.route,
+                requests: route.count,
+                errors: route.errors ?? 0,
+                client_errors: route.client_errors ?? 0,
+            }))
+            .sort(
+                (a, b) =>
+                    b.errors * 4 +
+                    b.client_errors -
+                    (a.errors * 4 + a.client_errors),
+            )
+            .slice(0, 8);
+
         const series = new Map<string, { avg_ms: number; db_ms: number }>();
         for (const [bucket, list] of byBucket) {
             const stats = describeTimings(list);
@@ -185,6 +248,16 @@ export class RequestMetricsService implements OnModuleInit, OnModuleDestroy {
             });
         }
 
-        return { overall: describeTimings(routes), slowest, series };
+        return {
+            overall: {
+                ...describeTimings(routes),
+                ...describeLoad(routes),
+            },
+            slowest,
+            heaviest,
+            chatty,
+            failing,
+            series,
+        };
     }
 }
