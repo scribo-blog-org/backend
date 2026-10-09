@@ -38,6 +38,9 @@ export type RouteTotals = {
     db_ms: number;
     max_ms: number;
     histogram: number[];
+    queries?: number;
+    errors?: number;
+    client_errors?: number;
 };
 
 export function mergeHistograms(items: number[][]) {
@@ -67,5 +70,19 @@ export function describeTimings(rows: RouteTotals[]) {
         max_ms: round(max),
         db_avg_ms: count ? round(db / count) : 0,
         db_share: total ? Math.min(1, db / total) : 0,
+    };
+}
+
+export function describeLoad(rows: RouteTotals[]) {
+    const count = rows.reduce((sum, row) => sum + row.count, 0);
+    const queries = rows.reduce((sum, row) => sum + (row.queries ?? 0), 0);
+    return {
+        total_ms: round(rows.reduce((sum, row) => sum + row.total_ms, 0)),
+        queries_avg: count ? round(queries / count) : 0,
+        errors: rows.reduce((sum, row) => sum + (row.errors ?? 0), 0),
+        client_errors: rows.reduce(
+            (sum, row) => sum + (row.client_errors ?? 0),
+            0,
+        ),
     };
 }

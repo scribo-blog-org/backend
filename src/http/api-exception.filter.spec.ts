@@ -43,6 +43,7 @@ describe('ApiExceptionFilter', () => {
             status: false,
             message: 'Incorrect type!',
             data: null,
+            request_id: null,
             errors: {
                 params: {
                     id: {

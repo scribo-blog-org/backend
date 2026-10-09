@@ -92,6 +92,7 @@ export class LogsQueryService {
             ];
         }
         if (query.type) filter.type = query.type;
+        if (query.request) filter['data.request.id'] = query.request;
         if (query.from || query.to) {
             filter.date_time = {
                 ...(query.from && { $gte: new Date(query.from) }),

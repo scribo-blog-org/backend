@@ -26,6 +26,15 @@ export class RequestMetricHour {
     @Prop({ required: true, default: 0 })
     max_ms!: number;
 
+    @Prop({ default: 0 })
+    queries!: number;
+
+    @Prop({ default: 0 })
+    errors!: number;
+
+    @Prop({ default: 0 })
+    client_errors!: number;
+
     @Prop({ type: Object, default: {} })
     h!: Record<string, number>;
 }

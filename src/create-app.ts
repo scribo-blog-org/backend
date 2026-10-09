@@ -10,6 +10,7 @@ import {
     uploadsDir,
 } from './files/files.config';
 import { ApiExceptionFilter } from './http/api-exception.filter';
+import { onSlowQuery } from './database/db-timing.plugin';
 import { LoggerService } from './infra/logger.service';
 import {
     requestContextMiddleware,
@@ -74,8 +75,15 @@ export async function configureScriboApp(
     app.use(cookieParser());
     app.use(requestContextMiddleware);
     const metrics = metricsOf(app);
-    if (metrics) {
-        app.use(requestTimingMiddleware((sample) => metrics.record(sample)));
+    const logger = loggerOf(app);
+    onSlowQuery(logger ? (query) => void logger.slowQuery(query) : undefined);
+    if (metrics || logger) {
+        app.use(
+            requestTimingMiddleware((sample) => {
+                metrics?.record(sample);
+                void logger?.slowRequest(sample);
+            }),
+        );
     }
     if (backendServesUploads(process.env)) {
         (app as NestExpressApplication).useStaticAssets(
@@ -96,7 +104,7 @@ export async function configureScriboApp(
         );
     }
     app.useGlobalPipes(new ScriboValidationPipe());
-    app.useGlobalFilters(new ApiExceptionFilter(loggerOf(app)));
+    app.useGlobalFilters(new ApiExceptionFilter(logger));
     app.enableCors({
         origin: (
             requestOrigin: string | undefined,
@@ -114,8 +122,8 @@ export async function configureScriboApp(
         },
         credentials: true,
         methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-        allowedHeaders: ['Content-Type', 'Authorization'],
-        exposedHeaders: ['Set-Cookie', 'Content-Disposition'],
+        allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
+        exposedHeaders: ['Set-Cookie', 'Content-Disposition', 'X-Request-Id'],
         optionsSuccessStatus: 200,
     });
 

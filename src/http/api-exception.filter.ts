@@ -8,6 +8,8 @@ import {
 import type { Request, Response } from 'express';
 import { Error as MongooseError } from 'mongoose';
 import type { LoggerService } from '../infra/logger.service';
+import { currentRequest } from '../infra/request-context';
+import { RateLimitedException } from './rate-limit.guard';
 import { MulterError } from 'multer';
 import {
     bagFromField,
@@ -34,6 +36,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
                 status: false,
                 message,
                 data: null,
+                request_id: currentRequest()?.id ?? null,
                 errors: bagFromField(source, field, message, exception.value),
             });
             return;
@@ -49,6 +52,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
                 status: false,
                 message,
                 data: null,
+                request_id: currentRequest()?.id ?? null,
                 errors: bagFromField('body', field, message, exception.code),
             });
             return;
@@ -85,10 +89,13 @@ export class ApiExceptionFilter implements ExceptionFilter {
             });
         }
 
+        this.logRefusal(exception, status, request);
+
         const payload: Record<string, unknown> = {
             status: false,
             message,
             data: null,
+            request_id: currentRequest()?.id ?? null,
         };
 
         if (exception instanceof FieldException) {
@@ -106,5 +113,37 @@ export class ApiExceptionFilter implements ExceptionFilter {
         }
 
         response.status(status).json(payload);
+    }
+
+    private logRefusal(exception: unknown, status: number, request: Request) {
+        if (!this.logger) return;
+        if (
+            status !== HttpStatus.FORBIDDEN &&
+            status !== HttpStatus.TOO_MANY_REQUESTS
+        ) {
+            return;
+        }
+        const auth = (request as { auth?: { id?: string } }).auth;
+        const route =
+            typeof request.route?.path === 'string'
+                ? `${request.method} ${request.baseUrl || ''}${request.route.path}`
+                : `${request.method} ${(request.originalUrl || request.url || '').split('?')[0]}`;
+        const who = auth?.id ?? currentRequest()?.ip ?? 'unknown';
+        const limited = status === HttpStatus.TOO_MANY_REQUESTS;
+        void this.logger.diagnostic({
+            type: limited ? 'rate_limited' : 'access_denied',
+            message: limited
+                ? `Rate limit hit on ${route}`
+                : `Access denied on ${route}`,
+            key: `${limited ? 'rate_limited' : 'access_denied'}|${who}|${route}`,
+            data: {
+                route,
+                status,
+                ...(limited && exception instanceof RateLimitedException
+                    ? { rule: exception.rule }
+                    : {}),
+                ...(auth?.id ? { user: auth.id } : { system: true }),
+            },
+        });
     }
 }

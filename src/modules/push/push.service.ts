@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { LoggerService } from '../../infra/logger.service';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -30,6 +31,7 @@ export class PushService {
         @InjectModel(PushSubscription.name)
         private readonly subscriptions: Model<PushSubscription>,
         config: ConfigService,
+        private readonly appLogger: LoggerService,
     ) {
         this.origin = (
             config.get<string>('API_ORIGIN')?.trim() ||
@@ -128,6 +130,7 @@ export class PushService {
                         await this.subscriptions.deleteOne({ _id: row._id });
                         return;
                     }
+                    void this.appLogger.externalFailed('push', error);
                     this.logger.warn(
                         `Push to ${userId} failed: ${
                             error instanceof Error ? error.message : error

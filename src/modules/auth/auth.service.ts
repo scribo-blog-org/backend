@@ -1,3 +1,4 @@
+import { currentRequest } from '../../infra/request-context';
 import {
     Injectable,
     NotFoundException,
@@ -34,15 +35,44 @@ export class AuthService {
         });
     }
 
+    private loginFailed(
+        reason: string,
+        method: 'password' | 'google',
+        identifier?: string,
+    ) {
+        const who = identifier?.toLowerCase() ?? 'unknown';
+        return this.logger.diagnostic({
+            type: 'login_failed',
+            message: `Failed sign-in${identifier ? ` for ${identifier}` : ''}`,
+            key: `login_failed|${currentRequest()?.ip ?? ''}|${who}|${reason}`,
+            data: {
+                system: true,
+                method,
+                reason,
+                ...(identifier ? { email: identifier } : {}),
+            },
+        });
+    }
+
     async emailFromGoogleToken(googleToken: string) {
         const response = await fetch(
             'https://www.googleapis.com/oauth2/v3/userinfo',
             {
                 headers: { Authorization: `Bearer ${googleToken}` },
             },
-        );
+        ).catch((error: unknown) => {
+            void this.logger.externalFailed('google', error);
+            throw error;
+        });
 
         if (response.status === 401) {
+            return null;
+        }
+        if (!response.ok) {
+            void this.logger.externalFailed(
+                'google',
+                new Error(`userinfo answered ${response.status}`),
+            );
             return null;
         }
 
@@ -83,6 +113,7 @@ export class AuthService {
         );
 
         if (!user) {
+            await this.loginFailed('no_user', 'password', userName);
             throw new NotFoundException(
                 'User with this email or nick name is not found',
             );
@@ -92,6 +123,7 @@ export class AuthService {
             !user.password ||
             !(await comparePassword(password, user.password))
         ) {
+            await this.loginFailed('bad_password', 'password', userName);
             throw new UnauthorizedException('Invalid password or login');
         }
 
@@ -104,10 +136,12 @@ export class AuthService {
     async loginByGoogle(googleToken: string, req: Request) {
         const email = await this.emailFromGoogleToken(googleToken);
         if (!email) {
+            await this.loginFailed('google_invalid', 'google');
             throw this.invalidGoogleToken(googleToken);
         }
         const user = await this.users.getByQuery({ email });
         if (!user) {
+            await this.loginFailed('no_user', 'google', email);
             throw new NotFoundException('User with this email is not found');
         }
         const tokens = await this.sessions.issueSession(user as never, req);

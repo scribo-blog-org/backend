@@ -29,6 +29,17 @@ import {
 import { RequestMetricsService } from './request-metrics.service';
 
 const DEDUPE_SECONDS = 8;
+const HEALTH_TYPES = [
+    'server_error',
+    'slow_request',
+    'login_failed',
+    'rate_limited',
+    'access_denied',
+    'external_failed',
+    'session_failed',
+];
+const DAY_MS = 24 * 60 * 60 * 1000;
+const repeated = { $add: [1, { $ifNull: ['$data.repeats', 0] }] };
 const LEGACY_PAGEVIEWS = 'pageviews';
 const LEGACY_PAGEVIEWS_STAGING = 'pageviews_migrating';
 
@@ -401,6 +412,128 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
         };
     }
 
+    private async healthSummary(from: Date) {
+        const now = Date.now();
+        const dayAgo = new Date(now - DAY_MS);
+        const [counts, topErrors, slowRequests, slowQueries, deploys, backup] =
+            await Promise.all([
+                this.logs.aggregate<{
+                    _id: { type: string; current: boolean };
+                    count: number;
+                }>([
+                    {
+                        $match: {
+                            type: { $in: HEALTH_TYPES },
+                            date_time: { $gte: new Date(now - 2 * DAY_MS) },
+                        },
+                    },
+                    {
+                        $group: {
+                            _id: {
+                                type: '$type',
+                                current: { $gte: ['$date_time', dayAgo] },
+                            },
+                            count: { $sum: repeated },
+                        },
+                    },
+                ]),
+                this.logs.aggregate([
+                    {
+                        $match: {
+                            type: 'server_error',
+                            date_time: { $gte: from },
+                        },
+                    },
+                    {
+                        $group: {
+                            _id: {
+                                method: '$data.method',
+                                path: '$data.path',
+                                error: '$data.error',
+                            },
+                            count: { $sum: repeated },
+                            first_at: { $min: '$date_time' },
+                            last_at: { $max: '$date_time' },
+                            status: { $last: '$data.status' },
+                        },
+                    },
+                    { $sort: { count: -1, last_at: -1 } },
+                    { $limit: 6 },
+                ]),
+                this.logs
+                    .find({ type: 'slow_request', date_time: { $gte: from } })
+                    .sort({ date_time: -1 })
+                    .limit(5)
+                    .lean(),
+                this.logs.aggregate([
+                    {
+                        $match: {
+                            type: 'slow_query',
+                            date_time: { $gte: from },
+                        },
+                    },
+                    {
+                        $group: {
+                            _id: {
+                                collection: '$data.collection',
+                                operation: '$data.operation',
+                            },
+                            count: { $sum: repeated },
+                            max_ms: { $max: '$data.duration_ms' },
+                            last_at: { $max: '$date_time' },
+                        },
+                    },
+                    { $sort: { count: -1 } },
+                    { $limit: 5 },
+                ]),
+                this.logs
+                    .find({ type: 'server_start', date_time: { $gte: from } })
+                    .sort({ date_time: -1 })
+                    .limit(6)
+                    .select('date_time data.version data.sha_short data.env')
+                    .lean(),
+                this.logs
+                    .findOne({
+                        type: { $in: ['backup_done', 'backup_failed'] },
+                    })
+                    .sort({ date_time: -1 })
+                    .select('type date_time message data.file_name data.error')
+                    .lean(),
+            ]);
+
+        const counters: Record<string, { current: number; previous: number }> =
+            Object.fromEntries(
+                HEALTH_TYPES.map((type) => [type, { current: 0, previous: 0 }]),
+            );
+        for (const row of counts) {
+            counters[row._id.type][row._id.current ? 'current' : 'previous'] =
+                row.count;
+        }
+
+        return {
+            counters,
+            top_errors: topErrors.map((row) => ({
+                method: row._id.method,
+                path: row._id.path,
+                error: row._id.error,
+                status: row.status,
+                count: row.count,
+                first_at: row.first_at,
+                last_at: row.last_at,
+            })),
+            slow_requests: slowRequests,
+            slow_queries: slowQueries.map((row) => ({
+                collection: row._id.collection,
+                operation: row._id.operation,
+                count: row.count,
+                max_ms: row.max_ms,
+                last_at: row.last_at,
+            })),
+            deploys,
+            last_backup: backup,
+        };
+    }
+
     async getDashboard(query: { days?: string }, actor: Actor) {
         if (!hasPermission(actor, PERMISSIONS.VIEW_LOGS)) {
             throw new ForbiddenException(
@@ -422,23 +555,31 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
                 : this.rangeStart(period.days),
         );
         const traffic = await this.trafficTotals(period);
-        const [contentTags, topPosts, activity, places, uniqueUsers, timings] =
-            await Promise.all([
-                this.contentHashtags(5),
-                this.posts
-                    .find({ views_count: { $gt: 0 } })
-                    .select('_id title views_count')
-                    .sort({ views_count: -1 })
-                    .limit(5)
-                    .lean(),
-                this.periodActivity(from),
-                this.placeActivity(firstHour),
-                this.uniqueSignedIn(firstHour),
-                this.requestMetrics.summary(
-                    firstHour,
-                    period.mode === 'hours' ? 13 : 10,
-                ),
-            ]);
+        const [
+            contentTags,
+            topPosts,
+            activity,
+            places,
+            uniqueUsers,
+            timings,
+            health,
+        ] = await Promise.all([
+            this.contentHashtags(5),
+            this.posts
+                .find({ views_count: { $gt: 0 } })
+                .select('_id title views_count')
+                .sort({ views_count: -1 })
+                .limit(5)
+                .lean(),
+            this.periodActivity(from),
+            this.placeActivity(firstHour),
+            this.uniqueSignedIn(firstHour),
+            this.requestMetrics.summary(
+                firstHour,
+                period.mode === 'hours' ? 13 : 10,
+            ),
+            this.healthSummary(from),
+        ]);
 
         const totalVisits =
             traffic.authorized_visits + traffic.anonymous_visits;
@@ -460,9 +601,13 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
                 unique_authorized: uniqueUsers,
             },
             places,
+            health,
             timings: {
                 ...timings.overall,
                 slowest: timings.slowest,
+                heaviest: timings.heaviest,
+                chatty: timings.chatty,
+                failing: timings.failing,
                 series: traffic.series.map((point) => {
                     const date = String(point.date);
                     const entry = timings.series.get(date);
