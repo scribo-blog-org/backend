@@ -238,7 +238,7 @@ export class SessionService implements OnModuleInit {
             type: 'session_failed',
             message: `Session refresh failed: ${reason}`,
             key: `session_failed|${currentRequest()?.ip ?? ''}|${reason}`,
-            data: { system: true, reason },
+            data: { reason },
         });
     }
 

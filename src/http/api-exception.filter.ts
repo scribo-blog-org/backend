@@ -142,7 +142,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
                 ...(limited && exception instanceof RateLimitedException
                     ? { rule: exception.rule }
                     : {}),
-                ...(auth?.id ? { user: auth.id } : { system: true }),
+                ...(auth?.id ? { user: auth.id } : {}),
             },
         });
     }

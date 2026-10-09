@@ -204,7 +204,7 @@ export class LoggerService {
                 total_ms: Math.round(sample.total_ms),
                 db_ms: Math.round(sample.db_ms),
                 db_queries: sample.db_queries,
-                ...(sample.user ? { user: sample.user } : { system: true }),
+                ...(sample.user ? { user: sample.user } : {}),
             },
         });
     }

@@ -46,7 +46,6 @@ export class AuthService {
             message: `Failed sign-in${identifier ? ` for ${identifier}` : ''}`,
             key: `login_failed|${currentRequest()?.ip ?? ''}|${who}|${reason}`,
             data: {
-                system: true,
                 method,
                 reason,
                 ...(identifier ? { email: identifier } : {}),
