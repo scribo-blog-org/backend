@@ -128,13 +128,28 @@ export class PushService {
 
         await Promise.all(
             rows.map(async (row) => {
-                // iOS has to show a notification for every push and cannot
-                // reliably close it again, so a dismiss would only leave a
-                // blank notification there.
+                const matching = isDismiss
+                    ? (row.shown_tags ?? []).filter((tag) =>
+                          payload.tag
+                              ? tag === payload.tag
+                              : payload.tagPrefix
+                                ? tag.startsWith(payload.tagPrefix)
+                                : false,
+                      )
+                    : [];
+
+                // Every push has to end in a visible notification, so a
+                // dismiss sent to a device with nothing to close would only
+                // flash a blank one. iOS also cannot reliably close a
+                // notification again, so it never gets a dismiss.
                 if (
                     isDismiss &&
-                    /iPhone|iPad|iPod/i.test(row.user_agent ?? '')
+                    (!matching.length ||
+                        /iPhone|iPad|iPod/i.test(row.user_agent ?? ''))
                 ) {
+                    if (matching.length) {
+                        await this.forgetTags(row._id, matching);
+                    }
                     return;
                 }
                 try {
@@ -146,6 +161,14 @@ export class PushService {
                         body,
                         { TTL: 60 * 60 * 24 },
                     );
+                    if (isDismiss) {
+                        await this.forgetTags(row._id, matching);
+                    } else if (payload.tag) {
+                        await this.subscriptions.updateOne(
+                            { _id: row._id },
+                            { $addToSet: { shown_tags: payload.tag } },
+                        );
+                    }
                 } catch (error: unknown) {
                     const status = (error as { statusCode?: number })
                         .statusCode;
@@ -160,6 +183,13 @@ export class PushService {
                     );
                 }
             }),
+        );
+    }
+
+    private async forgetTags(id: Types.ObjectId, tags: string[]) {
+        await this.subscriptions.updateOne(
+            { _id: id },
+            { $pull: { shown_tags: { $in: tags } } },
         );
     }
 }
