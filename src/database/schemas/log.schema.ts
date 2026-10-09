@@ -37,7 +37,6 @@ export const DIAGNOSTIC_LOG_TYPES = [
     'rate_limited',
     'access_denied',
     'external_failed',
-    'session_failed',
 ];
 const DIAGNOSTIC_TTL_SECONDS = 60 * 24 * 60 * 60;
 AppLogSchema.index(

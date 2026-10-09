@@ -13,7 +13,6 @@ import { parseDevice } from '../../visitor/device';
 import { clientIp, formatLocation, lookupVisitorGeo } from '../../visitor/geo';
 import { LoggerService } from '../../infra/logger.service';
 import { MailService } from '../../infra/mail.service';
-import { currentRequest } from '../../infra/request-context';
 import { Session } from '../../database/schemas/session.schema';
 import { REFRESH_TTL_MS } from '../../database/schemas/session.schema';
 import { getRefreshCookies } from './auth.cookies';
@@ -229,17 +228,7 @@ export class SessionService implements OnModuleInit {
             };
         }
 
-        await this.refreshFailed(lastError);
         throw new UnauthorizedException(lastError);
-    }
-
-    private refreshFailed(reason: string) {
-        return this.logger.diagnostic({
-            type: 'session_failed',
-            message: `Session refresh failed: ${reason}`,
-            key: `session_failed|${currentRequest()?.ip ?? ''}|${reason}`,
-            data: { reason },
-        });
     }
 
     async listUserSessions(actor: Actor, req: Request) {

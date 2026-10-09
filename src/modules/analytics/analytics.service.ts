@@ -34,11 +34,9 @@ const DEDUPE_SECONDS = 8;
 const HEALTH_TYPES = [
     'server_error',
     'slow_request',
-    'login_failed',
     'rate_limited',
     'access_denied',
     'external_failed',
-    'session_failed',
 ];
 const DAY_MS = 24 * 60 * 60 * 1000;
 const repeated = { $add: [1, { $ifNull: ['$data.repeats', 0] }] };
