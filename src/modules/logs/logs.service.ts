@@ -33,6 +33,38 @@ export function levelFilter(level: 'info' | 'warn' | 'error' | 'problems') {
     return { $nor: [problems] };
 }
 
+const SEARCH_FIELDS = [
+    'message',
+    'type',
+    'data.user_nick',
+    'data.target_nick',
+    'data.email',
+    'data.post_title',
+    'data.comment_text',
+    'data.title',
+    'data.error',
+    'data.reason',
+    'data.route',
+    'data.path',
+    'data.rule',
+    'data.service',
+    'data.collection',
+    'data.operation',
+    'data.file_name',
+    'data.original_name',
+    'data.request.id',
+    'data.request.path',
+    'data.request.ip',
+];
+
+// A substring match over the readable fields of an event. Spaces also match
+// the underscores of event types, so "slow request" finds slow_request.
+export function searchFilter(text: string) {
+    const pattern = escapeRegex(text.trim()).replace(/\s+/g, '[\\s_]+');
+    const regex = new RegExp(pattern, 'i');
+    return { $or: SEARCH_FIELDS.map((path) => ({ [path]: regex })) };
+}
+
 @Injectable()
 export class LogsQueryService {
     constructor(
@@ -90,6 +122,10 @@ export class LogsQueryService {
                 { 'data.old_role': query.role },
                 { 'data.new_role': query.role },
             ];
+        }
+        if (query.search?.trim()) {
+            const and = (filter.$and as unknown[] | undefined) ?? [];
+            filter.$and = [...and, searchFilter(query.search)];
         }
         if (query.type) filter.type = query.type;
         if (query.request) filter['data.request.id'] = query.request;

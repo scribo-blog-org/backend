@@ -174,6 +174,14 @@ export class ListLogsQueryDto extends PaginationQueryDto {
     @IsString()
     type?: string;
 
+    @ApiPropertyOptional({
+        description: 'Text to find in any field of an event',
+    })
+    @IsOptional()
+    @IsString()
+    @MaxLength(100)
+    search?: string;
+
     @ApiPropertyOptional({ description: 'Every event of one request' })
     @IsOptional()
     @IsString()

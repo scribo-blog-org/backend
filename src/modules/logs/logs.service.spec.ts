@@ -1,4 +1,4 @@
-import { LogsQueryService, levelFilter } from './logs.service';
+import { LogsQueryService, levelFilter, searchFilter } from './logs.service';
 
 describe('LogsQueryService user filter', () => {
     const admin = { id: 'a', role: 'admin' } as never;
@@ -71,5 +71,47 @@ describe('levelFilter', () => {
     it('excludes problems from info', () => {
         expect(levelFilter('info')).toHaveProperty('$nor');
         expect(levelFilter('warn')).toEqual({ level: 'warn' });
+    });
+});
+
+describe('search', () => {
+    it('matches a type typed with spaces and escapes regex characters', () => {
+        const { $or } = searchFilter('slow request');
+        const type = $or.find((item: any) => 'type' in item) as any;
+        expect(type.type.test('slow_request')).toBe(true);
+        expect(type.type.test('SLOW REQUEST')).toBe(true);
+
+        const dots = searchFilter('a.b(c').$or.find(
+            (item: any) => 'message' in item,
+        ) as any;
+        expect(dots.message.test('xa.b(cx')).toBe(true);
+        expect(dots.message.test('xaXb(cx')).toBe(false);
+    });
+
+    it('keeps the level and the search together', async () => {
+        const find = jest.fn().mockReturnValue({
+            sort: () => ({
+                skip: () => ({ limit: () => ({ lean: () => [] }) }),
+            }),
+        });
+        const model = { find, countDocuments: jest.fn().mockResolvedValue(0) };
+        const service = new LogsQueryService(
+            model as never,
+            {} as never,
+            {} as never,
+            {} as never,
+            {} as never,
+        );
+        await service.list(
+            { search: 'ab12', level: 'error' } as never,
+            { id: 'a', role: 'admin' } as never,
+        );
+        const filter = find.mock.calls[0][0];
+        expect(filter.$and.length).toBeGreaterThanOrEqual(2);
+        expect(
+            filter.$and.some((part: any) =>
+                part.$or?.some((item: any) => 'data.request.id' in item),
+            ),
+        ).toBe(true);
     });
 });
