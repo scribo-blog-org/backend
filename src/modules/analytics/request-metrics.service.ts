@@ -148,10 +148,20 @@ export class RequestMetricsService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    async summary(fromHour: string, bucketKeyLength: 10 | 13) {
+    // Hours are keys like 2026-11-08T14. The window is [fromHour, toHour]; with
+    // no toHour it runs up to now.
+    async summary(
+        fromHour: string,
+        bucketKeyLength: 10 | 13,
+        toHour?: string,
+    ) {
         await this.flush();
         const rows = await this.metrics
-            .find({ hour: { $gte: fromHour } })
+            .find({
+                hour: toHour
+                    ? { $gte: fromHour, $lte: toHour }
+                    : { $gte: fromHour },
+            })
             .lean<StoredRow[]>();
 
         const byRoute = new Map<string, RouteTotals>();

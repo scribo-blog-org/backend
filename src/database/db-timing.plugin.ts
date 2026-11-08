@@ -34,6 +34,14 @@ export function onSlowQuery(handler: ((query: SlowQuery) => void) | undefined) {
     reportSlow = handler;
 }
 
+// Slow queries are detected from the driver's command timing (see
+// db-command-monitor.ts), which is the database's own time. The timing of the
+// Mongoose calls below also counts the wait for a connection and for a busy
+// event loop, so it is only used for the per-request share of database time.
+export function emitSlowQuery(query: SlowQuery) {
+    reportSlow?.(query);
+}
+
 // Keeps the keys and operators of a filter but drops every value, so a slow
 // query can be identified without storing user data.
 export function filterShape(value: unknown, depth = 0): unknown {
@@ -58,35 +66,12 @@ export function filterShape(value: unknown, depth = 0): unknown {
     return '?';
 }
 
-type Call = { at: number; op: string; collection: string; filter?: unknown };
+type Call = { at: number };
 
 const started = new WeakMap<object, Call>();
 
-function describe(target: any): Omit<Call, 'at'> {
-    if (typeof target.getFilter === 'function') {
-        return {
-            op: String(target.op ?? 'query'),
-            collection: String(target.model?.collection?.name ?? ''),
-            filter: filterShape(target.getFilter()),
-        };
-    }
-    if (typeof target.pipeline === 'function') {
-        return {
-            op: 'aggregate',
-            collection: String(target._model?.collection?.name ?? ''),
-            filter: target
-                .pipeline()
-                .map((stage: object) => Object.keys(stage)[0]),
-        };
-    }
-    return {
-        op: 'save',
-        collection: String(target.constructor?.collection?.name ?? ''),
-    };
-}
-
 function begin(this: object) {
-    started.set(this, { at: performance.now(), ...describe(this) });
+    started.set(this, { at: performance.now() });
 }
 
 function finish(this: object) {
@@ -95,15 +80,6 @@ function finish(this: object) {
     started.delete(this);
     const ended = performance.now();
     addDbQuery(call.at, ended);
-    const ms = ended - call.at;
-    if (ms >= SLOW_QUERY_MS) {
-        reportSlow?.({
-            collection: call.collection,
-            op: call.op,
-            ms,
-            filter: call.filter,
-        });
-    }
 }
 
 type Bulk = { at: number; op: string };
@@ -125,18 +101,6 @@ function finishBulk(this: object) {
     if (!call) return;
     const ended = performance.now();
     addDbQuery(call.at, ended);
-    const ms = ended - call.at;
-    if (ms >= SLOW_QUERY_MS) {
-        reportSlow?.({
-            collection: String(
-                (this as { collection?: { name?: string } }).collection?.name ??
-                    '',
-            ),
-            op: call.op,
-            ms,
-            filter: undefined,
-        });
-    }
 }
 
 export function dbTimingPlugin(schema: Schema) {

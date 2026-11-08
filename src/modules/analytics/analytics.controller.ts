@@ -28,6 +28,17 @@ export class AnalyticsController {
 
     @ApiBearerAuth()
     @RequirePermissions(PERMISSIONS.VIEW_LOGS)
+    @Get('app')
+    app(@CurrentUser() actor: Actor) {
+        return {
+            status: true,
+            message: 'App info fetched',
+            data: this.analytics.appInfo(actor),
+        };
+    }
+
+    @ApiBearerAuth()
+    @RequirePermissions(PERMISSIONS.VIEW_LOGS)
     @Get('dashboard')
     async dashboard(
         @Query() query: DashboardQueryDto,

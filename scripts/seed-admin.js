@@ -32,6 +32,23 @@ function rounds() {
     return Number.isFinite(value) && value >= 4 && value <= 31 ? value : 10;
 }
 
+// Leaves a trace in the same log the admin panel reads, so an administrator
+// that appeared without anyone signing up can be explained later. Never holds
+// a password. A failed write must not undo or fail the seed itself.
+async function writeLog(entry) {
+    try {
+        await mongoose.connection.collection('logs').insertOne({
+            date_time: new Date(),
+            level: 'info',
+            ...entry,
+        });
+    } catch (error) {
+        console.error(
+            `seed:admin: could not write the log entry: ${error instanceof Error ? error.message : error}`,
+        );
+    }
+}
+
 async function main() {
     const uri = process.env.MONGODB_URI?.trim();
     if (!uri) fail('MONGODB_URI is not set (run through `npm run seed:admin`)');
@@ -65,6 +82,19 @@ async function main() {
         const set = { role: 'tech_admin', is_verified: true };
         if (givenPassword) set.password = bcrypt.hashSync(givenPassword, rounds());
         await users.updateOne({ _id: existing._id }, { $set: set });
+        await writeLog({
+            type: 'seed_admin',
+            message: `Seed restored administrator ${nick}`,
+            data: {
+                system: true,
+                created: false,
+                updated_user: existing._id,
+                target_nick: nick,
+                old_role: existing.role,
+                new_role: 'tech_admin',
+                password_changed: Boolean(givenPassword),
+            },
+        });
         console.log(
             `seed:admin: user "${nick}" already existed, role set to tech_admin` +
                 (givenPassword ? ', password updated' : ', password unchanged'),
@@ -77,7 +107,7 @@ async function main() {
     }
 
     const password = givenPassword || randomBytes(12).toString('base64url');
-    await users.insertOne({
+    const inserted = await users.insertOne({
         nick_name: nick,
         email,
         password: bcrypt.hashSync(password, rounds()),
@@ -93,6 +123,19 @@ async function main() {
         follows: [],
         followers: [],
         notifications: [],
+    });
+
+    await writeLog({
+        type: 'seed_admin',
+        message: `Seed created administrator ${nick}`,
+        data: {
+            system: true,
+            created: true,
+            updated_user: inserted.insertedId,
+            target_nick: nick,
+            new_role: 'tech_admin',
+            password_generated: !givenPassword,
+        },
     });
 
     console.log(`seed:admin: created tech_admin "${nick}" <${email}>`);
