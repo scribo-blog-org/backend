@@ -162,7 +162,10 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
         let days: number;
 
         if (key === 'custom') {
-            if (!ISO_DAY.test(query.from || '') || !ISO_DAY.test(query.to || '')) {
+            if (
+                !ISO_DAY.test(query.from || '') ||
+                !ISO_DAY.test(query.to || '')
+            ) {
                 throw new BadRequestException('Pick both dates');
             }
             const start = new Date(`${query.from}T00:00:00.000Z`);
@@ -448,7 +451,10 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
         const lastKey = this.utcDayString(new Date(period.to.getTime() - 1));
         const rows = await this.visitDays
             .find({
-                day: { $gte: this.utcDayString(period.prevFrom), $lte: lastKey },
+                day: {
+                    $gte: this.utcDayString(period.prevFrom),
+                    $lte: lastKey,
+                },
             })
             .lean();
         const current = rows.filter((row) => row.day >= fromKey);
@@ -466,8 +472,7 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
         return {
             visits: audience.authorized + audience.anonymous,
             visits_prev: (before.authorized + before.anonymous) as
-                | number
-                | null,
+                number | null,
             signed_in: audience.authorized,
             anonymous: audience.anonymous,
             series: this.fillDaysFrom(period.from, period.days, {
@@ -596,7 +601,9 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
 
         const period = this.resolvePeriod(query);
         const window = this.hourWindow(period);
-        const inPeriod = { created_date: { $gte: period.from, $lt: period.to } };
+        const inPeriod = {
+            created_date: { $gte: period.from, $lt: period.to },
+        };
 
         const [
             traffic,
@@ -657,7 +664,9 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
                 visits: traffic.visits,
                 visits_prev: traffic.visits_prev,
                 signed_in: traffic.signed_in,
-                signed_in_share: totalVisits ? traffic.signed_in / totalVisits : 0,
+                signed_in_share: totalVisits
+                    ? traffic.signed_in / totalVisits
+                    : 0,
                 unique_signed_in: uniqueUsers,
                 series: traffic.series,
             },

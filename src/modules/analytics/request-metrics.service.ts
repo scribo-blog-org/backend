@@ -148,11 +148,7 @@ export class RequestMetricsService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    async summary(
-        fromHour: string,
-        bucketKeyLength: 10 | 13,
-        toHour?: string,
-    ) {
+    async summary(fromHour: string, bucketKeyLength: 10 | 13, toHour?: string) {
         await this.flush();
         const rows = await this.metrics
             .find({
