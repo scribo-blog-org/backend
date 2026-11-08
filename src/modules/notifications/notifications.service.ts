@@ -97,7 +97,6 @@ export class NotificationsService {
             body: entry.body,
             url: entry.url,
             tag: `notification:${notification.type}`,
-            // Support replies are sent in the team's name, not the staff member's.
             icon: notification.type.startsWith('support_')
                 ? undefined
                 : this.push.avatarUrl(actor?.avatar),

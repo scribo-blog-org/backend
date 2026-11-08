@@ -28,8 +28,6 @@ AppLogSchema.index({ 'data.user': 1, date_time: -1 });
 AppLogSchema.index({ 'data.post': 1, date_time: -1 });
 AppLogSchema.index({ 'data.request.id': 1 });
 
-// Diagnostics are noisy by nature and only useful while fresh, so they expire.
-// Audit events (posts, roles, backups) and server errors are kept.
 export const DIAGNOSTIC_LOG_TYPES = [
     'slow_request',
     'slow_query',

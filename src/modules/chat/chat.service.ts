@@ -301,11 +301,49 @@ export class ChatService {
         });
     }
 
+    private async lastMessageState(row: ConversationLean, userId: string) {
+        const none = { isOwn: false, status: null as 'sent' | 'read' | null };
+
+        if (!row.last_message_at || !row.last_message_id) {
+            return none;
+        }
+
+        const latest = await this.messages
+            .findById(row.last_message_id)
+            .select('sender_id system_event createdAt created_at')
+            .lean<MessageLean>();
+
+        if (!latest || latest.system_event) {
+            return none;
+        }
+
+        const senderId = String(
+            (latest.sender_id as UserLean)?._id ?? latest.sender_id,
+        );
+        if (senderId !== userId) {
+            return none;
+        }
+
+        const createdAt = new Date(this.messageDate(latest));
+        const allRead = this.participantIds(row)
+            .filter((participantId) => participantId !== userId)
+            .every((participantId) => {
+                const readAt = row.last_read_at?.[participantId];
+                return Boolean(readAt) && new Date(readAt as Date) >= createdAt;
+            });
+
+        return {
+            isOwn: true,
+            status: allRead ? ('read' as const) : ('sent' as const),
+        };
+    }
+
     private async serializeConversationListItem(
         row: ConversationLean,
         userId: string,
     ) {
         const unread = await this.unreadForConversation(row, userId);
+        const lastMessage = await this.lastMessageState(row, userId);
         const base = {
             _id: String(row._id),
             last_message_text: row.last_message_text
@@ -313,6 +351,8 @@ export class ChatService {
                 : '',
             last_message_sender_name: row.last_message_sender_name || '',
             last_message_at: row.last_message_at,
+            last_message_is_own: lastMessage.isOwn,
+            last_message_status: lastMessage.status,
             unread,
         };
 
@@ -1645,7 +1685,22 @@ export class ChatService {
         );
 
         await this.pushUnread(actor.id);
-        await this.pushConversationUpdate(String(conversation._id), [actor.id]);
+
+        const latest = conversation.last_message_id
+            ? await this.messages
+                  .findById(conversation.last_message_id)
+                  .select('sender_id')
+                  .lean<MessageLean>()
+            : null;
+        const writerId = latest
+            ? String((latest.sender_id as UserLean)?._id ?? latest.sender_id)
+            : null;
+        await this.pushConversationUpdate(
+            String(conversation._id),
+            writerId && writerId !== actor.id
+                ? [actor.id, writerId]
+                : [actor.id],
+        );
 
         return { read_at: now };
     }

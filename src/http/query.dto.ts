@@ -6,6 +6,7 @@ import {
     IsISO8601,
     IsOptional,
     IsString,
+    Matches,
     Max,
     MaxLength,
     Min,
@@ -213,11 +214,30 @@ export class ListLogEntitiesQueryDto extends PaginationQueryDto {
 }
 
 export class DashboardQueryDto {
-    @ApiPropertyOptional()
+    @ApiPropertyOptional({
+        enum: ['24h', '7', '30', 'custom'],
+        description: 'Length of the period. "custom" needs from and to',
+    })
     @IsOptional()
     @IsString()
-    @IsIn(['24h', '7', '14', '30'])
-    days?: string;
+    @IsIn(['24h', '7', '30', 'custom'])
+    period?: string;
+
+    @ApiPropertyOptional({
+        description: 'First day of a custom period, YYYY-MM-DD (UTC)',
+    })
+    @IsOptional()
+    @IsString()
+    @Matches(/^\d{4}-\d{2}-\d{2}$/)
+    from?: string;
+
+    @ApiPropertyOptional({
+        description: 'Last day of a custom period, YYYY-MM-DD (UTC)',
+    })
+    @IsOptional()
+    @IsString()
+    @Matches(/^\d{4}-\d{2}-\d{2}$/)
+    to?: string;
 }
 
 export class ListSupportQueryDto extends PaginationQueryDto {
