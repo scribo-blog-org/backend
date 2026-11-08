@@ -89,9 +89,6 @@ export class SupportService {
         return {};
     }
 
-    // Staff see a dot while at least one request is new. Sending the current
-    // total instead of a delta keeps every open admin tab correct, whoever
-    // changed the request.
     private async broadcastNewCount() {
         try {
             const count = await this.tickets.countDocuments(
@@ -241,8 +238,6 @@ export class SupportService {
             message?: string;
         },
     ) {
-        // The email always goes out, also for account owners: the in-app
-        // notification and the request list stay as they are.
         this.notifyByEmail(item, emailPayload);
         if (item.user) {
             await this.notifications.sendNotification(

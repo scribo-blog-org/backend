@@ -148,8 +148,6 @@ export class RequestMetricsService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    // Hours are keys like 2026-11-08T14. The window is [fromHour, toHour]; with
-    // no toHour it runs up to now.
     async summary(
         fromHour: string,
         bucketKeyLength: 10 | 13,

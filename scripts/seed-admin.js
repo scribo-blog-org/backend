@@ -1,23 +1,4 @@
 #!/usr/bin/env node
-/**
- * Creates (or repairs) a development account with the `tech_admin` role, so a
- * fresh deployment can be entered and a backup uploaded without touching the
- * database by hand.
- *
- *   npm run seed:admin
- *
- * Environment (read from backend/.env through `node --env-file`):
- *   MONGODB_URI            required, same connection string the backend uses
- *   SEED_ADMIN_NICK        default: dev-admin
- *   SEED_ADMIN_EMAIL       default: dev-admin@scribo.local
- *   SEED_ADMIN_PASSWORD    optional. Unset: a random password is generated and
- *                          printed once when the account is created. Set: the
- *                          password is (re)applied on every run.
- *   PASSWORD_SALT          bcrypt rounds, same meaning as in the backend
- *   SEED_ALLOW_PRODUCTION  must be "1" to run when NODE_ENV=production
- *
- * Idempotent: running it again never creates a second account.
- */
 const { randomBytes } = require('crypto');
 const bcrypt = require('bcryptjs');
 const mongoose = require('mongoose');
@@ -32,9 +13,6 @@ function rounds() {
     return Number.isFinite(value) && value >= 4 && value <= 31 ? value : 10;
 }
 
-// Leaves a trace in the same log the admin panel reads, so an administrator
-// that appeared without anyone signing up can be explained later. Never holds
-// a password. A failed write must not undo or fail the seed itself.
 async function writeLog(entry) {
     try {
         await mongoose.connection.collection('logs').insertOne({

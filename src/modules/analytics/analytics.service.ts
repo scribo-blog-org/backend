@@ -34,16 +34,11 @@ import { RequestMetricsService } from './request-metrics.service';
 const DEDUPE_SECONDS = 8;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
-// Hourly rows of places, signed-in visitors and request timings live this long,
-// so a period can reach back this far and no further.
 const RETENTION_DAYS = 70;
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const LEGACY_PAGEVIEWS = 'pageviews';
 const LEGACY_PAGEVIEWS_STAGING = 'pageviews_migrating';
 
-// A period is a half-open window [from, to). "24h" is the last 24 hours and is
-// drawn by the hour; everything else is whole UTC days drawn by the day. The
-// window right before it, of the same length, is what changes are compared to.
 type PeriodKey = '24h' | '7' | '30' | 'custom';
 
 type Period = {
@@ -210,8 +205,6 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
         };
     }
 
-    // First and last hour key (inclusive) of a period, for the tables that are
-    // kept by the hour: places, signed-in visitors and request timings.
     private hourWindow(period: Period) {
         const first =
             period.granularity === 'hour'
@@ -440,8 +433,6 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
 
         return {
             visits: audience.authorized + audience.anonymous,
-            // The by-the-hour table only keeps a day, so there is nothing
-            // older to compare with.
             visits_prev: null as number | null,
             signed_in: audience.authorized,
             anonymous: audience.anonymous,
@@ -486,7 +477,6 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
         };
     }
 
-    // What happened on the site between two moments.
     private async activityBetween(from: Date, to: Date) {
         const range = { $gte: from, $lt: to };
         const [registered, logins, posts, comments, likes] = await Promise.all([
@@ -504,8 +494,6 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
         match: Record<string, unknown> = {},
         limit = 8,
     ) {
-        // Some posts keep their category as a string and some as an ObjectId,
-        // so it is compared as a string or the same category is counted twice.
         const rows = await this.posts.aggregate<{
             _id: string;
             count: number;
@@ -655,8 +643,6 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
 
         const totalVisits = traffic.signed_in + traffic.anonymous;
 
-        // Everything under "period" follows the selected window. Everything
-        // under "overview" and "app" does not, and the page says so.
         return {
             period: {
                 key: period.key,
@@ -733,8 +719,6 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
         };
     }
 
-    // The running version, shown in the admin panel header on every tab, so it
-    // does not wait for the dashboard to be computed.
     appInfo(actor: Actor) {
         if (!hasPermission(actor, PERMISSIONS.VIEW_LOGS)) {
             throw new ForbiddenException(

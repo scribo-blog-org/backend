@@ -62,8 +62,6 @@ import {
                     connectTimeoutMS: 8000,
                     socketTimeoutMS: 10000,
                     bufferCommands: false,
-                    // Makes the driver report how long each command took, which
-                    // is what the slow query log is built on.
                     monitorCommands: true,
                     connectionFactory: (connection: Connection) => {
                         connection.plugin(dbTimingPlugin);

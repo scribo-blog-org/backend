@@ -54,8 +54,6 @@ export class PushService {
         }
     }
 
-    // The service worker has no base for relative paths in push payloads, and
-    // stored avatars are `/uploads/...` paths without a host.
     avatarUrl(value?: string | null) {
         if (!value) return undefined;
         if (/^https?:\/\//.test(value)) return value;

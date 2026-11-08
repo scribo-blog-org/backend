@@ -155,9 +155,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         return dbVersionOf(appVersion());
     }
 
-    // The list is of backups, not of runs: only copies whose file exists, so
-    // every row can be downloaded. Failed runs and copies that were rotated out
-    // or replaced stay in the log (backup_failed, backup_rotation, ...).
     private readonly existing = {
         status: 'success' as const,
         file_name: { $nin: [null, ''] },
@@ -521,7 +518,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
                 {
                     out: partial,
                     accepted: tarAccepted,
-                    // macOS tar otherwise stores file metadata as extra "._*" entries
                     env: { COPYFILE_DISABLE: '1' },
                 },
             );

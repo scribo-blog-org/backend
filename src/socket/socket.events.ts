@@ -7,7 +7,6 @@ export class SocketEvents {
 
     constructor(private readonly redis: RedisPublisher) {}
 
-    // Staff-only room; the socket service decides who may join it.
     readonly adminRoom = 'admin';
 
     chatRoom(conversationId: string) {

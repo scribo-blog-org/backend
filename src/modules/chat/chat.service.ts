@@ -301,9 +301,6 @@ export class ChatService {
         });
     }
 
-    // Whether the newest message of a conversation is the viewer's and, if it
-    // is, whether everyone else has read it. Same rule as the status shown on a
-    // message inside the chat.
     private async lastMessageState(row: ConversationLean, userId: string) {
         const none = { isOwn: false, status: null as 'sent' | 'read' | null };
 
@@ -1689,8 +1686,6 @@ export class ChatService {
 
         await this.pushUnread(actor.id);
 
-        // The reader's own list changes (unread). So does the list of whoever
-        // wrote the newest message: its status becomes "read".
         const latest = conversation.last_message_id
             ? await this.messages
                   .findById(conversation.last_message_id)

@@ -13,11 +13,6 @@ const TAG_BYTES = 16;
 export class ChatCrypto {
     private readonly keys = new Map<string, Buffer>();
 
-    /**
-     * `keys` is a comma-separated list of `id:secret` pairs, `activeId` picks
-     * the one used for new writes. Older keys stay in the list until every
-     * stored value has been re-encrypted with the active one.
-     */
     constructor(
         keys: string,
         private readonly activeId: string,

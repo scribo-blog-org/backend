@@ -28,7 +28,6 @@ export class ChatMessage {
     @Prop({ type: Types.ObjectId, ref: 'User', required: true })
     sender_id!: Types.ObjectId;
 
-    // Stored encrypted; the length limits are enforced on the plain text before encryption.
     @Prop({ required: true })
     text!: string;
 

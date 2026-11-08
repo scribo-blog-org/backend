@@ -4,7 +4,6 @@ import { onSlowQuery, type SlowQuery } from './db-timing.plugin';
 
 type Command = Record<string, unknown>;
 
-// A client that only emits the driver's command events.
 function setup(threshold = 100) {
     const client = new EventEmitter();
     const slow: SlowQuery[] = [];

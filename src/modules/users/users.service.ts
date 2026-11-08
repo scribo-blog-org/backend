@@ -222,10 +222,6 @@ export class UsersService implements OnModuleInit {
 
         const ids = items.map((user) => user._id);
 
-        // The newest thing each user did. One indexed lookup per user on the
-        // page (data.user + date_time), not a scan of the whole log. Events
-        // are stored with the id either as an ObjectId or as a string, so
-        // both forms are matched. Diagnostics are not actions of the user.
         const lastActionRows = await Promise.all(
             ids.map((id) =>
                 this.logs

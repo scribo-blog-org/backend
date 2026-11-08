@@ -57,8 +57,6 @@ const SEARCH_FIELDS = [
     'data.request.ip',
 ];
 
-// A substring match over the readable fields of an event. Spaces also match
-// the underscores of event types, so "slow request" finds slow_request.
 export function searchFilter(text: string) {
     const pattern = escapeRegex(text.trim()).replace(/\s+/g, '[\\s_]+');
     const regex = new RegExp(pattern, 'i');
