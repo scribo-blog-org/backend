@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import { createWriteStream } from 'fs';
+import { devNull as devNullPath } from 'os';
 import path from 'path';
 import { pipeline } from 'stream/promises';
 
@@ -66,5 +67,5 @@ export async function runProcess(
 }
 
 function devNull() {
-    return createWriteStream('/dev/null');
+    return createWriteStream(devNullPath);
 }

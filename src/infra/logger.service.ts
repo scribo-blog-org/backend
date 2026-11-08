@@ -32,8 +32,6 @@ const DIAGNOSTIC_REPEAT_MS = 30_000;
 const DIAGNOSTIC_BUDGET_PER_MINUTE = 60;
 const MAX_TRACKED_KEYS = 500;
 const SLOW_REQUEST_MS = Number(process.env.SLOW_REQUEST_MS) || 1000;
-// Backups and restores are long by design, health checks and analytics pings
-// are not worth a row.
 const SLOW_REQUEST_IGNORED = [
     /^[A-Z]+ \/health/,
     /^[A-Z]+ \/api\/analytics\//,
@@ -181,6 +179,7 @@ export class LoggerService {
         const message = error instanceof Error ? error.message : String(error);
         return this.diagnostic({
             type: 'external_failed',
+            level: 'error',
             message: `${service} failed: ${message}`,
             key: `external_failed|${service}|${message}`,
             data: { system: true, service, error: message.slice(0, 300) },
@@ -232,9 +231,6 @@ export class LoggerService {
         }
     }
 
-    // Warnings about requests that are expected to repeat in bursts (failed
-    // logins, rate limits, denied access): one row per key per window, with
-    // the number of skipped repeats attached to the next row.
     async diagnostic(input: DiagnosticInput) {
         const now = Date.now();
         const last = this.diagnosticSeen.get(input.key);

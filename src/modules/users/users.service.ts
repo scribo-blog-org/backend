@@ -18,6 +18,10 @@ import { PostComment } from '../../database/schemas/post-comment.schema';
 import { Session } from '../../database/schemas/session.schema';
 import { ROLE_VALUES } from '../../authz/roles';
 import { User } from '../../database/schemas/user.schema';
+import {
+    AppLog,
+    DIAGNOSTIC_LOG_TYPES,
+} from '../../database/schemas/log.schema';
 
 type UserLean = {
     _id: Types.ObjectId;
@@ -44,6 +48,7 @@ export class UsersService implements OnModuleInit {
         @InjectModel(Post.name) private readonly posts: Model<Post>,
         @InjectModel(PostComment.name)
         private readonly comments: Model<PostComment>,
+        @InjectModel(AppLog.name) private readonly logs: Model<AppLog>,
         private readonly logger: LoggerService,
         private readonly notificationsService: NotificationsService,
     ) {}
@@ -216,6 +221,23 @@ export class UsersService implements OnModuleInit {
             ]);
 
         const ids = items.map((user) => user._id);
+
+        const lastActionRows = await Promise.all(
+            ids.map((id) =>
+                this.logs
+                    .findOne({
+                        'data.user': { $in: [id, String(id)] },
+                        type: { $nin: DIAGNOSTIC_LOG_TYPES },
+                    })
+                    .sort({ date_time: -1 })
+                    .select('type message date_time data')
+                    .lean(),
+            ),
+        );
+        const lastActions = new Map(
+            ids.map((id, index) => [String(id), lastActionRows[index]]),
+        );
+
         const [postCounts, commentCounts] = await Promise.all([
             this.posts.aggregate<{ _id: Types.ObjectId; n: number }>([
                 { $match: { author: { $in: ids } } },
@@ -239,6 +261,7 @@ export class UsersService implements OnModuleInit {
                 followers_count: user.followers?.length ?? 0,
                 posts_count: posts.get(String(user._id)) ?? 0,
                 comments_count: comments.get(String(user._id)) ?? 0,
+                last_action: lastActions.get(String(user._id)) ?? null,
             })),
             pagination: paginationMeta(page, limit, total),
             summary: {

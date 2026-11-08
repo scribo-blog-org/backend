@@ -155,12 +155,18 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         return dbVersionOf(appVersion());
     }
 
+    private readonly existing = {
+        status: 'success' as const,
+        file_name: { $nin: [null, ''] },
+        file_removed_at: null,
+    };
+
     async list(query: { page?: number; limit?: number }) {
         const { page, limit, skip } = parsePagination(query, 10, 50);
         const [total, items] = await Promise.all([
-            this.backups.countDocuments(),
+            this.backups.countDocuments(this.existing),
             this.backups
-                .find()
+                .find(this.existing)
                 .sort({ started_at: -1 })
                 .skip(skip)
                 .limit(limit)
@@ -512,7 +518,6 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
                 {
                     out: partial,
                     accepted: tarAccepted,
-                    // macOS tar otherwise stores file metadata as extra "._*" entries
                     env: { COPYFILE_DISABLE: '1' },
                 },
             );

@@ -148,10 +148,14 @@ export class RequestMetricsService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    async summary(fromHour: string, bucketKeyLength: 10 | 13) {
+    async summary(fromHour: string, bucketKeyLength: 10 | 13, toHour?: string) {
         await this.flush();
         const rows = await this.metrics
-            .find({ hour: { $gte: fromHour } })
+            .find({
+                hour: toHour
+                    ? { $gte: fromHour, $lte: toHour }
+                    : { $gte: fromHour },
+            })
             .lean<StoredRow[]>();
 
         const byRoute = new Map<string, RouteTotals>();

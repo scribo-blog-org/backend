@@ -1,15 +1,3 @@
-// Removes log entries that can no longer say anything: the post, category or
-// user they are about is gone and the log has no name snapshot, so the admin
-// panel can only render them as nameless "deleted" cards.
-//
-// Dry run (default):
-//   mongosh "<uri>" --quiet scripts/clean-stale-logs.mongosh.js
-// Apply:
-//   mongosh "<uri>" --quiet --eval 'var APPLY = true' scripts/clean-stale-logs.mongosh.js
-//
-// Dump the collection first:
-//   mongodump --uri="<uri>" --collection=logs --archive --gzip > logs.archive.gz
-
 const apply = typeof APPLY !== 'undefined' && APPLY === true;
 const ids = (name) =>
     new Set(

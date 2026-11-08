@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import {
+    BadRequestException,
     Injectable,
     ForbiddenException,
     Logger,
@@ -9,7 +10,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import Redis from 'ioredis';
-import { Connection, Model } from 'mongoose';
+import { Connection, Model, Types } from 'mongoose';
 import type { Request } from 'express';
 import { PERMISSIONS } from '../../authz/permissions';
 import { hasPermission, type Actor } from '../../authz/policy';
@@ -31,16 +32,24 @@ import { appVersion } from '../backups/manifest';
 import { RequestMetricsService } from './request-metrics.service';
 
 const DEDUPE_SECONDS = 8;
-const HEALTH_TYPES = [
-    'server_error',
-    'slow_request',
-    'rate_limited',
-    'external_failed',
-];
 const DAY_MS = 24 * 60 * 60 * 1000;
-const repeated = { $add: [1, { $ifNull: ['$data.repeats', 0] }] };
+const HOUR_MS = 60 * 60 * 1000;
+const RETENTION_DAYS = 70;
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const LEGACY_PAGEVIEWS = 'pageviews';
 const LEGACY_PAGEVIEWS_STAGING = 'pageviews_migrating';
+
+type PeriodKey = '24h' | '7' | '30' | 'custom';
+
+type Period = {
+    key: PeriodKey;
+    granularity: 'hour' | 'day';
+    from: Date;
+    to: Date;
+    days: number;
+    prevFrom: Date;
+    prevTo: Date;
+};
 
 type VisitBucket = {
     authorized?: number;
@@ -111,18 +120,6 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
         return start;
     }
 
-    private hoursAgo(hours: number) {
-        return new Date(Date.now() - hours * 60 * 60 * 1000);
-    }
-
-    private dateRangeFilter(from: Date, to?: Date) {
-        if (to) {
-            return { $gte: from, $lt: to };
-        }
-
-        return { $gte: from };
-    }
-
     private dayKeyExpr(field: string) {
         return {
             $dateToString: {
@@ -133,18 +130,109 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
         };
     }
 
-    private parsePeriod(value?: string) {
-        if (value === '24h') {
-            return { mode: 'hours' as const, hours: 24, key: '24h' as const };
+    private dayStart(offsetDays = 0) {
+        const day = new Date();
+        day.setUTCHours(0, 0, 0, 0);
+        day.setUTCDate(day.getUTCDate() + offsetDays);
+        return day;
+    }
+
+    private resolvePeriod(query: {
+        period?: string;
+        from?: string;
+        to?: string;
+    }): Period {
+        const key = (query.period || '7') as PeriodKey;
+
+        if (key === '24h') {
+            const to = new Date();
+            const from = new Date(to.getTime() - DAY_MS);
+            return {
+                key,
+                granularity: 'hour',
+                from,
+                to,
+                days: 1,
+                prevFrom: new Date(from.getTime() - DAY_MS),
+                prevTo: from,
+            };
         }
 
-        const days = Number.parseInt(String(value || '14'), 10);
-        const normalized = [7, 14, 30].includes(days) ? days : 14;
+        let from: Date;
+        let days: number;
+
+        if (key === 'custom') {
+            if (
+                !ISO_DAY.test(query.from || '') ||
+                !ISO_DAY.test(query.to || '')
+            ) {
+                throw new BadRequestException('Pick both dates');
+            }
+            const start = new Date(`${query.from}T00:00:00.000Z`);
+            let end = new Date(`${query.to}T00:00:00.000Z`);
+            if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+                throw new BadRequestException('The dates are not valid');
+            }
+            if (start > end) {
+                throw new BadRequestException(
+                    'The start date is after the end date',
+                );
+            }
+            const today = this.dayStart();
+            if (end > today) {
+                end = today;
+            }
+            if (start > end) {
+                throw new BadRequestException('The period is in the future');
+            }
+            if (start < this.rangeStart(RETENTION_DAYS)) {
+                throw new BadRequestException(
+                    `Statistics are kept for ${RETENTION_DAYS} days`,
+                );
+            }
+            from = start;
+            days = Math.round((end.getTime() - start.getTime()) / DAY_MS) + 1;
+        } else {
+            days = key === '30' ? 30 : 7;
+            from = this.rangeStart(days);
+        }
+
         return {
-            mode: 'days' as const,
-            days: normalized,
-            key: normalized,
+            key: key === 'custom' ? 'custom' : key === '30' ? '30' : '7',
+            granularity: 'day',
+            from,
+            to: new Date(from.getTime() + days * DAY_MS),
+            days,
+            prevFrom: new Date(from.getTime() - days * DAY_MS),
+            prevTo: from,
         };
+    }
+
+    private hourWindow(period: Period) {
+        const first =
+            period.granularity === 'hour'
+                ? new Date(this.hourStart(new Date()).getTime() - 23 * HOUR_MS)
+                : period.from;
+        const last = new Date(Math.min(period.to.getTime() - 1, Date.now()));
+        return { first: this.hourKey(first), last: this.hourKey(last) };
+    }
+
+    private fillDaysFrom(
+        from: Date,
+        days: number,
+        maps: Record<string, Map<string, number>>,
+    ) {
+        const series = [];
+        for (let i = 0; i < days; i += 1) {
+            const day = new Date(from.getTime() + i * DAY_MS);
+            const key = this.utcDayString(day);
+            const point: Record<string, unknown> = { date: key };
+            for (const [name, map] of Object.entries(maps)) {
+                point[name] = map.get(key) || 0;
+            }
+            series.push(point);
+        }
+        return series;
     }
 
     private sanitizePath(path?: string) {
@@ -154,12 +242,6 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
             .trim();
         if (!raw.startsWith('/')) return '/';
         return raw.slice(0, 200);
-    }
-
-    private toMap(rows: { _id: string; count: number }[]) {
-        const map = new Map<string, number>();
-        for (const row of rows) map.set(row._id, row.count);
-        return map;
     }
 
     private resolveVisitorId(actor: Actor | undefined, req: Request) {
@@ -175,22 +257,6 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
             .slice(0, 32);
 
         return `a:${digest}`;
-    }
-
-    private fillDays(days: number, maps: Record<string, Map<string, number>>) {
-        const start = this.rangeStart(days);
-        const series = [];
-        for (let i = 0; i < days; i += 1) {
-            const day = new Date(start);
-            day.setUTCDate(start.getUTCDate() + i);
-            const key = this.utcDayString(day);
-            const point: Record<string, unknown> = { date: key };
-            for (const [name, map] of Object.entries(maps)) {
-                point[name] = map.get(key) || 0;
-            }
-            series.push(point);
-        }
-        return series;
     }
 
     private fillHours(
@@ -348,315 +414,140 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    private async periodActivity(from: Date, to?: Date) {
-        const dateFilter = this.dateRangeFilter(from, to);
-
-        const [logRows, commentsCreated, logins, newUsers] = await Promise.all([
-            this.logs.aggregate([
-                {
-                    $match: {
-                        date_time: dateFilter,
-                        type: {
-                            $in: [
-                                'create_post',
-                                'update_post',
-                                'delete_post',
-                                'register',
-                                'comment_post',
-                                'reply_comment',
-                                'update_comment',
-                                'delete_comment',
-                                'like_post',
-                            ],
-                        },
-                    },
+    private async trafficByHour() {
+        const end = this.hourStart(new Date());
+        const start = new Date(end.getTime() - 23 * HOUR_MS);
+        const rows = await this.visitHours
+            .find({
+                hour: {
+                    $gte: this.hourKey(start),
+                    $lte: this.hourKey(end),
                 },
-                { $group: { _id: '$type', count: { $sum: 1 } } },
-            ]),
-            this.comments.countDocuments({ created_date: dateFilter }),
-            this.sessions.countDocuments({ createdAt: dateFilter }),
-            this.users.countDocuments({ created_date: dateFilter }),
-        ]);
-
-        const counts = new Map(
-            (logRows as { _id: string; count: number }[]).map((row) => [
-                row._id,
-                row.count,
-            ]),
-        );
-
-        const commentsWritten =
-            commentsCreated ||
-            (counts.get('comment_post') || 0) +
-                (counts.get('reply_comment') || 0);
-
-        return {
-            posts: {
-                created: counts.get('create_post') || 0,
-                updated: counts.get('update_post') || 0,
-                deleted: counts.get('delete_post') || 0,
-            },
-            users: {
-                registered: newUsers || counts.get('register') || 0,
-                logins,
-            },
-            comments: {
-                created: commentsWritten,
-                updated: counts.get('update_comment') || 0,
-                deleted: counts.get('delete_comment') || 0,
-            },
-            likes: {
-                posts: counts.get('like_post') || 0,
-            },
-        };
-    }
-
-    private async healthSummary(from: Date) {
-        const now = Date.now();
-        const dayAgo = new Date(now - DAY_MS);
-        const [counts, topErrors, slowRequests, slowQueries, deploys, backup] =
-            await Promise.all([
-                this.logs.aggregate<{
-                    _id: { type: string; current: boolean };
-                    count: number;
-                }>([
-                    {
-                        $match: {
-                            type: { $in: HEALTH_TYPES },
-                            date_time: { $gte: new Date(now - 2 * DAY_MS) },
-                        },
-                    },
-                    {
-                        $group: {
-                            _id: {
-                                type: '$type',
-                                current: { $gte: ['$date_time', dayAgo] },
-                            },
-                            count: { $sum: repeated },
-                        },
-                    },
-                ]),
-                this.logs.aggregate([
-                    {
-                        $match: {
-                            type: 'server_error',
-                            date_time: { $gte: from },
-                        },
-                    },
-                    {
-                        $group: {
-                            _id: {
-                                method: '$data.method',
-                                path: '$data.path',
-                                error: '$data.error',
-                            },
-                            count: { $sum: repeated },
-                            first_at: { $min: '$date_time' },
-                            last_at: { $max: '$date_time' },
-                            status: { $last: '$data.status' },
-                        },
-                    },
-                    { $sort: { count: -1, last_at: -1 } },
-                    { $limit: 6 },
-                ]),
-                this.logs
-                    .find({ type: 'slow_request', date_time: { $gte: from } })
-                    .sort({ date_time: -1 })
-                    .limit(5)
-                    .lean(),
-                this.logs.aggregate([
-                    {
-                        $match: {
-                            type: 'slow_query',
-                            date_time: { $gte: from },
-                        },
-                    },
-                    {
-                        $group: {
-                            _id: {
-                                collection: '$data.collection',
-                                operation: '$data.operation',
-                            },
-                            count: { $sum: repeated },
-                            max_ms: { $max: '$data.duration_ms' },
-                            last_at: { $max: '$date_time' },
-                        },
-                    },
-                    { $sort: { count: -1 } },
-                    { $limit: 5 },
-                ]),
-                this.logs
-                    .find({ type: 'server_start', date_time: { $gte: from } })
-                    .sort({ date_time: -1 })
-                    .limit(6)
-                    .select('date_time data.version data.sha_short data.env')
-                    .lean(),
-                this.logs
-                    .findOne({
-                        type: { $in: ['backup_done', 'backup_failed'] },
-                    })
-                    .sort({ date_time: -1 })
-                    .select('type date_time message data.file_name data.error')
-                    .lean(),
-            ]);
-
-        const counters: Record<string, { current: number; previous: number }> =
-            Object.fromEntries(
-                HEALTH_TYPES.map((type) => [type, { current: 0, previous: 0 }]),
-            );
-        for (const row of counts) {
-            counters[row._id.type][row._id.current ? 'current' : 'previous'] =
-                row.count;
+            })
+            .lean();
+        const audience = this.sumBuckets(rows);
+        const visits = new Map<string, number>();
+        const signedIn = new Map<string, number>();
+        for (const row of rows) {
+            const parts = this.bucketParts(row);
+            visits.set(row.hour, parts.authorized + parts.anonymous);
+            signedIn.set(row.hour, parts.authorized);
         }
 
         return {
-            counters,
-            top_errors: topErrors.map((row) => ({
-                method: row._id.method,
-                path: row._id.path,
-                error: row._id.error,
-                status: row.status,
-                count: row.count,
-                first_at: row.first_at,
-                last_at: row.last_at,
-            })),
-            slow_requests: slowRequests,
-            slow_queries: slowQueries.map((row) => ({
-                collection: row._id.collection,
-                operation: row._id.operation,
-                count: row.count,
-                max_ms: row.max_ms,
-                last_at: row.last_at,
-            })),
-            deploys,
-            last_backup: backup,
+            visits: audience.authorized + audience.anonymous,
+            visits_prev: null as number | null,
+            signed_in: audience.authorized,
+            anonymous: audience.anonymous,
+            series: this.fillHours(24, {
+                visits,
+                signed_in: signedIn,
+            }),
         };
     }
 
-    async getDashboard(query: { days?: string }, actor: Actor) {
-        if (!hasPermission(actor, PERMISSIONS.VIEW_LOGS)) {
-            throw new ForbiddenException(
-                "You don't have permission to view analytics",
-            );
+    private async trafficByDay(period: Period) {
+        const fromKey = this.utcDayString(period.from);
+        const lastKey = this.utcDayString(new Date(period.to.getTime() - 1));
+        const rows = await this.visitDays
+            .find({
+                day: {
+                    $gte: this.utcDayString(period.prevFrom),
+                    $lte: lastKey,
+                },
+            })
+            .lean();
+        const current = rows.filter((row) => row.day >= fromKey);
+        const previous = rows.filter((row) => row.day < fromKey);
+        const audience = this.sumBuckets(current);
+        const before = this.sumBuckets(previous);
+        const visits = new Map<string, number>();
+        const signedIn = new Map<string, number>();
+        for (const row of current) {
+            const parts = this.bucketParts(row);
+            visits.set(row.day, parts.authorized + parts.anonymous);
+            signedIn.set(row.day, parts.authorized);
         }
 
-        const period = this.parsePeriod(query.days);
-        const from =
-            period.mode === 'hours'
-                ? this.hoursAgo(period.hours)
-                : this.rangeStart(period.days);
-        const firstHour = this.hourKey(
-            period.mode === 'hours'
-                ? new Date(
-                      this.hourStart(new Date()).getTime() -
-                          (period.hours - 1) * 60 * 60 * 1000,
-                  )
-                : this.rangeStart(period.days),
-        );
-        const traffic = await this.trafficTotals(period);
-        const [
-            contentTags,
-            topPosts,
-            activity,
-            places,
-            uniqueUsers,
-            timings,
-            health,
-        ] = await Promise.all([
-            this.contentHashtags(5),
-            this.posts
-                .find({ views_count: { $gt: 0 } })
-                .select('_id title views_count')
-                .sort({ views_count: -1 })
-                .limit(5)
-                .lean(),
-            this.periodActivity(from),
-            this.placeActivity(firstHour),
-            this.uniqueSignedIn(firstHour),
-            this.requestMetrics.summary(
-                firstHour,
-                period.mode === 'hours' ? 13 : 10,
-            ),
-            this.healthSummary(from),
-        ]);
-
-        const totalVisits =
-            traffic.authorized_visits + traffic.anonymous_visits;
-
         return {
-            days: period.key,
-            totals: {
-                visits: traffic.visits,
-                visits_prev: traffic.visits_prev,
-            },
-            series: traffic.series,
-            activity,
-            audience: {
-                authorized_visits: traffic.authorized_visits,
-                anonymous_visits: traffic.anonymous_visits,
-                authorized_share: totalVisits
-                    ? traffic.authorized_visits / totalVisits
-                    : 0,
-                unique_authorized: uniqueUsers,
-            },
-            places,
-            app: {
-                version: appVersion(),
-                sha: buildInfo().sha_short,
-                started_at: new Date(Date.now() - process.uptime() * 1000),
-            },
-            health,
-            timings: {
-                ...timings.overall,
-                slowest: timings.slowest,
-                heaviest: timings.heaviest,
-                chatty: timings.chatty,
-                failing: timings.failing,
-                series: traffic.series.map((point) => {
-                    const date = String(point.date);
-                    const entry = timings.series.get(date);
-                    return {
-                        date,
-                        avg_ms: entry?.avg_ms ?? 0,
-                        db_ms: entry?.db_ms ?? 0,
-                    };
-                }),
-            },
-            top_posts: (
-                topPosts as Array<{
-                    _id: unknown;
-                    title: string;
-                    views_count?: number;
-                }>
-            ).map((post) => ({
-                _id: post._id,
-                title: post.title,
-                views_count: Number(post.views_count || 0),
-            })),
-            top_hashtags: contentTags.top as Array<{
-                tag: string;
-                uses: number;
-                posts: number;
-                comments: number;
-            }>,
+            visits: audience.authorized + audience.anonymous,
+            visits_prev: (before.authorized + before.anonymous) as
+                number | null,
+            signed_in: audience.authorized,
+            anonymous: audience.anonymous,
+            series: this.fillDaysFrom(period.from, period.days, {
+                visits,
+                signed_in: signedIn,
+            }),
         };
     }
 
-    private async uniqueSignedIn(firstHour: string) {
+    private async activityBetween(from: Date, to: Date) {
+        const range = { $gte: from, $lt: to };
+        const [registered, logins, posts, comments, likes] = await Promise.all([
+            this.users.countDocuments({ created_date: range }),
+            this.logs.countDocuments({ type: 'login', date_time: range }),
+            this.posts.countDocuments({ created_date: range }),
+            this.comments.countDocuments({ created_date: range }),
+            this.logs.countDocuments({ type: 'like_post', date_time: range }),
+        ]);
+
+        return { registered, logins, posts, comments, likes };
+    }
+
+    private async postsByCategory(
+        match: Record<string, unknown> = {},
+        limit = 8,
+    ) {
+        const rows = await this.posts.aggregate<{
+            _id: string;
+            count: number;
+        }>([
+            { $match: match },
+            { $group: { _id: { $toString: '$category' }, count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: limit },
+        ]);
+        const categories = await this.categories
+            .find({
+                _id: {
+                    $in: rows
+                        .map((row) => row._id)
+                        .filter((id) => Types.ObjectId.isValid(id)),
+                },
+            })
+            .select('name color')
+            .lean();
+        const byId = new Map(
+            categories.map((category) => [String(category._id), category]),
+        );
+
+        return rows.map((row) => {
+            const category = byId.get(String(row._id));
+            return {
+                _id: row._id,
+                name: category?.name ?? 'Deleted category',
+                color: category?.color ?? null,
+                count: row.count,
+            };
+        });
+    }
+
+    private async uniqueSignedIn(first: string, last: string) {
         const rows = await this.visitUsers.aggregate<{ n: number }>([
-            { $match: { hour: { $gte: firstHour } } },
+            { $match: { hour: { $gte: first, $lte: last } } },
             { $group: { _id: '$user' } },
             { $count: 'n' },
         ]);
         return rows[0]?.n ?? 0;
     }
 
-    private async placeActivity(firstHour: string) {
+    private async placeActivity(first: string, last: string) {
         const rows = await this.visitPlaces.aggregate<{
             _id: { city: string; country: string };
             count: number;
         }>([
-            { $match: { hour: { $gte: firstHour } } },
+            { $match: { hour: { $gte: first, $lte: last } } },
             {
                 $group: {
                     _id: { city: '$city', country: '$country' },
@@ -689,15 +580,165 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
             ...place,
             share: total ? place.count / total : 0,
         });
-        const top = known.slice(0, 8);
-        const bottom = known.slice(top.length).reverse().slice(0, 5);
 
         return {
-            top: top.map(withShare),
-            bottom: bottom.map(withShare),
+            top: known.slice(0, 8).map(withShare),
             total_places: known.length,
             located_visits: total,
             unknown_visits: unknown,
+        };
+    }
+
+    async getDashboard(
+        query: { period?: string; from?: string; to?: string },
+        actor: Actor,
+    ) {
+        if (!hasPermission(actor, PERMISSIONS.VIEW_LOGS)) {
+            throw new ForbiddenException(
+                "You don't have permission to view analytics",
+            );
+        }
+
+        const period = this.resolvePeriod(query);
+        const window = this.hourWindow(period);
+        const inPeriod = {
+            created_date: { $gte: period.from, $lt: period.to },
+        };
+
+        const [
+            traffic,
+            now,
+            before,
+            categoriesNow,
+            places,
+            uniqueUsers,
+            timings,
+            totals,
+            topPosts,
+            contentTags,
+            categoriesAll,
+        ] = await Promise.all([
+            period.granularity === 'hour'
+                ? this.trafficByHour()
+                : this.trafficByDay(period),
+            this.activityBetween(period.from, period.to),
+            this.activityBetween(period.prevFrom, period.prevTo),
+            this.postsByCategory(inPeriod),
+            this.placeActivity(window.first, window.last),
+            this.uniqueSignedIn(window.first, window.last),
+            this.requestMetrics.summary(
+                window.first,
+                period.granularity === 'hour' ? 13 : 10,
+                window.last,
+            ),
+            Promise.all([
+                this.users.countDocuments(),
+                this.posts.countDocuments(),
+                this.comments.countDocuments(),
+                this.categories.countDocuments(),
+                this.likesTotal(),
+            ]),
+            this.posts
+                .find({ views_count: { $gt: 0 } })
+                .select('_id title views_count')
+                .sort({ views_count: -1 })
+                .limit(5)
+                .lean(),
+            this.contentHashtags(5),
+            this.postsByCategory(),
+        ]);
+
+        const totalVisits = traffic.signed_in + traffic.anonymous;
+
+        return {
+            period: {
+                key: period.key,
+                granularity: period.granularity,
+                from: period.from,
+                to: period.to,
+                days: period.days,
+                previous: { from: period.prevFrom, to: period.prevTo },
+                retention_days: RETENTION_DAYS,
+            },
+            traffic: {
+                visits: traffic.visits,
+                visits_prev: traffic.visits_prev,
+                signed_in: traffic.signed_in,
+                signed_in_share: totalVisits
+                    ? traffic.signed_in / totalVisits
+                    : 0,
+                unique_signed_in: uniqueUsers,
+                series: traffic.series,
+            },
+            people: {
+                registered: now.registered,
+                registered_prev: before.registered,
+                logins: now.logins,
+                logins_prev: before.logins,
+            },
+            content: {
+                posts: now.posts,
+                posts_prev: before.posts,
+                comments: now.comments,
+                comments_prev: before.comments,
+                likes: now.likes,
+                likes_prev: before.likes,
+                by_category: categoriesNow,
+            },
+            places,
+            performance: {
+                ...timings.overall,
+                slowest: timings.slowest,
+                heaviest: timings.heaviest,
+                series: traffic.series.map((point) => {
+                    const date = String(point.date);
+                    const entry = timings.series.get(date);
+                    return {
+                        date,
+                        avg_ms: entry?.avg_ms ?? 0,
+                        db_ms: entry?.db_ms ?? 0,
+                    };
+                }),
+            },
+            overview: {
+                users: totals[0],
+                posts: totals[1],
+                comments: totals[2],
+                categories: totals[3],
+                likes: totals[4],
+                top_posts: (
+                    topPosts as Array<{
+                        _id: unknown;
+                        title: string;
+                        views_count?: number;
+                    }>
+                ).map((post) => ({
+                    _id: post._id,
+                    title: post.title,
+                    views_count: Number(post.views_count || 0),
+                })),
+                top_hashtags: contentTags.top as Array<{
+                    tag: string;
+                    uses: number;
+                    posts: number;
+                    comments: number;
+                }>,
+                by_category: categoriesAll,
+            },
+        };
+    }
+
+    appInfo(actor: Actor) {
+        if (!hasPermission(actor, PERMISSIONS.VIEW_LOGS)) {
+            throw new ForbiddenException(
+                "You don't have permission to view this",
+            );
+        }
+
+        return {
+            version: appVersion(),
+            sha: buildInfo().sha_short,
+            started_at: new Date(Date.now() - process.uptime() * 1000),
         };
     }
 
@@ -772,71 +813,6 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
             top,
             posts_with_hashtags: postsWithTags,
             unique_hashtags: tags.size,
-        };
-    }
-
-    private async trafficTotals(period: {
-        mode: 'hours' | 'days';
-        hours?: number;
-        days?: number;
-    }) {
-        if (period.mode === 'hours') {
-            const end = this.hourStart(new Date());
-            const start = new Date(end);
-            start.setUTCHours(start.getUTCHours() - ((period.hours || 24) - 1));
-            const rows = await this.visitHours
-                .find({
-                    hour: {
-                        $gte: this.hourKey(start),
-                        $lte: this.hourKey(end),
-                    },
-                })
-                .lean();
-            const audience = this.sumBuckets(rows);
-            const visitMap = new Map(
-                rows.map((row) => [
-                    row.hour,
-                    this.bucketParts(row).authorized +
-                        this.bucketParts(row).anonymous,
-                ]),
-            );
-
-            return {
-                visits: audience.authorized + audience.anonymous,
-                visits_prev: null,
-                authorized_visits: audience.authorized,
-                anonymous_visits: audience.anonymous,
-                series: this.fillHours(period.hours || 24, {
-                    visits: visitMap,
-                }),
-            };
-        }
-
-        const days = period.days || 14;
-        const from = this.utcDayString(this.rangeStart(days));
-        const previousFrom = this.utcDayString(this.rangeStart(days * 2));
-        const rows = await this.visitDays
-            .find({ day: { $gte: previousFrom } })
-            .lean();
-        const current = rows.filter((row) => row.day >= from);
-        const previous = rows.filter((row) => row.day < from);
-        const audience = this.sumBuckets(current);
-        const previousAudience = this.sumBuckets(previous);
-        const visitMap = new Map(
-            current.map((row) => [
-                row.day,
-                this.bucketParts(row).authorized +
-                    this.bucketParts(row).anonymous,
-            ]),
-        );
-
-        return {
-            visits: audience.authorized + audience.anonymous,
-            visits_prev:
-                previousAudience.authorized + previousAudience.anonymous,
-            authorized_visits: audience.authorized,
-            anonymous_visits: audience.anonymous,
-            series: this.fillDays(days, { visits: visitMap }),
         };
     }
 

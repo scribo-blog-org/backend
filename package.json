@@ -1,6 +1,6 @@
 {
   "name": "scribo_nest",
-  "version": "8.3.0",
+  "version": "8.4.0",
   "description": "",
   "author": "",
   "private": true,
@@ -13,6 +13,7 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "lint": "eslint src --fix",
     "lint:check": "eslint src",
+    "seed:admin": "node --env-file=.env scripts/seed-admin.js",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",

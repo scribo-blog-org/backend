@@ -32,6 +32,7 @@ import {
     RequestMetricHourSchema,
 } from './schemas/request-metric.schema';
 import { dbTimingPlugin } from './db-timing.plugin';
+import { watchSlowCommands } from './db-command-monitor';
 import {
     SearchQueryLog,
     SearchQueryLogSchema,
@@ -61,8 +62,12 @@ import {
                     connectTimeoutMS: 8000,
                     socketTimeoutMS: 10000,
                     bufferCommands: false,
+                    monitorCommands: true,
                     connectionFactory: (connection: Connection) => {
                         connection.plugin(dbTimingPlugin);
+                        connection.once('connected', () =>
+                            watchSlowCommands(connection.getClient()),
+                        );
                         return connection;
                     },
                 };
