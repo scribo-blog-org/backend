@@ -155,12 +155,21 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         return dbVersionOf(appVersion());
     }
 
+    // The list is of backups, not of runs: only copies whose file exists, so
+    // every row can be downloaded. Failed runs and copies that were rotated out
+    // or replaced stay in the log (backup_failed, backup_rotation, ...).
+    private readonly existing = {
+        status: 'success' as const,
+        file_name: { $nin: [null, ''] },
+        file_removed_at: null,
+    };
+
     async list(query: { page?: number; limit?: number }) {
         const { page, limit, skip } = parsePagination(query, 10, 50);
         const [total, items] = await Promise.all([
-            this.backups.countDocuments(),
+            this.backups.countDocuments(this.existing),
             this.backups
-                .find()
+                .find(this.existing)
                 .sort({ started_at: -1 })
                 .skip(skip)
                 .limit(limit)

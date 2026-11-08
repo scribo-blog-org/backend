@@ -181,6 +181,7 @@ export class LoggerService {
         const message = error instanceof Error ? error.message : String(error);
         return this.diagnostic({
             type: 'external_failed',
+            level: 'error',
             message: `${service} failed: ${message}`,
             key: `external_failed|${service}|${message}`,
             data: { system: true, service, error: message.slice(0, 300) },
