@@ -11,6 +11,7 @@ import type { LoggerService } from '../infra/logger.service';
 import { currentRequest } from '../infra/request-context';
 import { RateLimitedException } from './rate-limit.guard';
 import { MulterError } from 'multer';
+import { postMediaFileSizeError } from '../files/upload';
 import {
     bagFromField,
     FieldBagException,
@@ -47,7 +48,7 @@ export class ApiExceptionFilter implements ExceptionFilter {
             const message =
                 exception.code === 'LIMIT_FILE_SIZE'
                     ? field === 'file'
-                        ? 'Max size of the file should be 100 MB!'
+                        ? postMediaFileSizeError()
                         : 'Max size of image should be 5 MB!'
                     : exception.message;
             response.status(HttpStatus.BAD_REQUEST).json({

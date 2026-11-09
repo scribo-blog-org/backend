@@ -5,13 +5,16 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { lastValueFrom, of, throwError } from 'rxjs';
 import {
-    POST_MEDIA_TOTAL_ERROR,
     PostUploadsCleanupInterceptor,
     PostUploadsGuardInterceptor,
     discardFiles,
     uploadedFiles,
 } from './post-uploads.interceptor';
-import { POST_MEDIA_BODY_OVERHEAD, POST_MEDIA_LIMIT_SIZE } from './upload';
+import {
+    POST_MEDIA_BODY_OVERHEAD,
+    postMediaLimitSize,
+    postMediaTotalError,
+} from './upload';
 
 let dir: string;
 beforeEach(async () => {
@@ -57,7 +60,7 @@ describe('PostUploadsGuardInterceptor', () => {
         const req = {
             headers: {
                 'content-length': String(
-                    POST_MEDIA_LIMIT_SIZE + POST_MEDIA_BODY_OVERHEAD + 1,
+                    postMediaLimitSize() + POST_MEDIA_BODY_OVERHEAD + 1,
                 ),
             },
         };
@@ -68,7 +71,7 @@ describe('PostUploadsGuardInterceptor', () => {
             new PostUploadsGuardInterceptor().intercept(context(req), next);
         } catch (error: any) {
             expect(error.getResponse()).toMatchObject({
-                message: POST_MEDIA_TOTAL_ERROR,
+                message: postMediaTotalError(),
                 field: 'media',
             });
         }

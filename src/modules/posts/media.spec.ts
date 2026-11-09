@@ -1,10 +1,9 @@
 import type { FilesService } from '../../files/files.service';
-import { POST_MEDIA_LIMIT_SIZE } from '../../files/upload';
+import { postMediaLimitSize, postMediaTotalError } from '../../files/upload';
 import type { LinkPreviewService } from '../link-preview/link-preview.service';
 import {
     MEDIA_FILE_MISSING_ERROR,
     MEDIA_LINK_UNSUPPORTED_ERROR,
-    MEDIA_TOTAL_ERROR,
     MediaService,
     classifyEmbedUrl,
     legacyMedia,
@@ -119,16 +118,18 @@ describe('MediaService.resolve', () => {
                 { type: 'video', url: up('a.mp4'), size: 1 },
                 { type: 'video', url: up('b.mp4'), size: 1 },
             ]),
-        ).rejects.toMatchObject({ response: { message: MEDIA_TOTAL_ERROR } });
-        expect(MEDIA_TOTAL_ERROR).toBe(
+        ).rejects.toMatchObject({
+            response: { message: postMediaTotalError() },
+        });
+        expect(postMediaTotalError()).toBe(
             'Media in one post cannot exceed 100 MB',
         );
     });
 
     it('allows exactly the total limit', async () => {
         const { service } = build({
-            [up('a.mp4')]: POST_MEDIA_LIMIT_SIZE / 2,
-            [up('b.mp4')]: POST_MEDIA_LIMIT_SIZE / 2,
+            [up('a.mp4')]: postMediaLimitSize() / 2,
+            [up('b.mp4')]: postMediaLimitSize() / 2,
         });
         const items = await service.resolve([
             { type: 'video', url: up('a.mp4') },
@@ -430,7 +431,9 @@ describe('MediaService.resolveWithFiles', () => {
                 ]),
                 [part('new')],
             ),
-        ).rejects.toMatchObject({ response: { message: MEDIA_TOTAL_ERROR } });
+        ).rejects.toMatchObject({
+            response: { message: postMediaTotalError() },
+        });
     });
 
     it('mixes kept files, new uploads and embeds', async () => {

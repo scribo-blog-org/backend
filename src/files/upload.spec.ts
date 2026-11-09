@@ -1,17 +1,17 @@
 import { detectMime, mimeMatches } from './magic';
 import {
     ALLOWED_POST_MEDIA_MIME_TYPES,
-    POST_MEDIA_LIMIT_SIZE,
     POST_MEDIA_TYPE_ERROR,
     UPLOAD_LIMIT_SIZE,
     postMediaFileFilter,
     postMediaKind,
+    postMediaLimitSize,
 } from './upload';
 
 describe('post media upload rules', () => {
     it('keeps the avatar limit at 5 MB and post media at 100 MB', () => {
         expect(UPLOAD_LIMIT_SIZE).toBe(5 * 1024 * 1024);
-        expect(POST_MEDIA_LIMIT_SIZE).toBe(100 * 1024 * 1024);
+        expect(postMediaLimitSize()).toBe(100 * 1024 * 1024);
     });
 
     it('accepts the documented image, gif and video types', () => {

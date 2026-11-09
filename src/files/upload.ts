@@ -7,7 +7,31 @@ import { fieldError } from '../http/http-errors';
 import { uploadsDir } from './files.config';
 
 export const UPLOAD_LIMIT_SIZE = 5 * 1024 * 1024;
-export const POST_MEDIA_LIMIT_SIZE = 100 * 1024 * 1024;
+const DEFAULT_POST_MEDIA_MAX_MB = 100;
+
+/**
+ * Per-post (and per-file) media limit in MB, `POST_MEDIA_MAX_MB`.
+ * Read from process.env on every call: multer options are built at import
+ * time, before ConfigModule has loaded .env.
+ */
+export function postMediaMaxMb(): number {
+    const value = Number(process.env.POST_MEDIA_MAX_MB);
+    return Number.isFinite(value) && value > 0
+        ? value
+        : DEFAULT_POST_MEDIA_MAX_MB;
+}
+
+export function postMediaLimitSize(): number {
+    return Math.floor(postMediaMaxMb() * 1024 * 1024);
+}
+
+export function postMediaTotalError(): string {
+    return `Media in one post cannot exceed ${postMediaMaxMb()} MB`;
+}
+
+export function postMediaFileSizeError(): string {
+    return `Max size of the file should be ${postMediaMaxMb()} MB!`;
+}
 export const POST_MEDIA_DIR = 'src/post_media';
 export const POST_MEDIA_MAX_FILES = 10;
 export const POST_MEDIA_BODY_OVERHEAD = 2 * 1024 * 1024;
@@ -103,7 +127,10 @@ export function postMediaFilesInterceptor() {
     );
     return AnyFilesInterceptor({
         limits: {
-            fileSize: POST_MEDIA_LIMIT_SIZE,
+            // Getter: busboy reads limits.fileSize for every request.
+            get fileSize() {
+                return postMediaLimitSize();
+            },
             files: POST_MEDIA_MAX_FILES,
         },
         storage: diskStorage({

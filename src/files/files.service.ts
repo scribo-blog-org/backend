@@ -9,7 +9,8 @@ import { detectMime, mimeMatches, readHead } from './magic';
 import {
     ALLOWED_IMAGE_MIME_TYPES,
     POST_MEDIA_DIR,
-    POST_MEDIA_LIMIT_SIZE,
+    postMediaFileSizeError,
+    postMediaLimitSize,
     POST_MEDIA_TYPE_ERROR,
     UPLOAD_LIMIT_SIZE,
     postMediaKind,
@@ -88,13 +89,9 @@ export class FilesService {
             await discard();
             throw fieldError('file', POST_MEDIA_TYPE_ERROR, file.mimetype);
         }
-        if (file.size > POST_MEDIA_LIMIT_SIZE) {
+        if (file.size > postMediaLimitSize()) {
             await discard();
-            throw fieldError(
-                'file',
-                `Max size of the file should be ${POST_MEDIA_LIMIT_SIZE / 1024 / 1024} MB!`,
-                file.size,
-            );
+            throw fieldError('file', postMediaFileSizeError(), file.size);
         }
         if (!file.path || !file.filename) {
             throw new InternalServerErrorException(

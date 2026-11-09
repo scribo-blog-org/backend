@@ -4,13 +4,9 @@ import { tmpdir } from 'os';
 import path from 'path';
 import type { Actor } from '../../authz/policy';
 import type { FilesService } from '../../files/files.service';
-import { POST_MEDIA_LIMIT_SIZE } from '../../files/upload';
+import { postMediaLimitSize, postMediaTotalError } from '../../files/upload';
 import type { LinkPreviewService } from '../link-preview/link-preview.service';
-import {
-    MEDIA_FILE_MISSING_ERROR,
-    MEDIA_TOTAL_ERROR,
-    MediaService,
-} from './media';
+import { MEDIA_FILE_MISSING_ERROR, MediaService } from './media';
 import { PostsService } from './posts.service';
 
 const MB = 1024 * 1024;
@@ -193,7 +189,7 @@ describe('PostsService.create with uploads', () => {
                 actor,
             ),
         ).rejects.toMatchObject({
-            response: { message: MEDIA_TOTAL_ERROR },
+            response: { message: postMediaTotalError() },
         });
         expect(posts.create).not.toHaveBeenCalled();
         expect(existsSync(a.path)).toBe(false);
@@ -280,7 +276,7 @@ describe('PostsService.edit with uploads', () => {
         const { service, posts } = build({
             sizes: {
                 [up('keep.jpg')]: 70 * MB,
-                [up('n1.jpg')]: POST_MEDIA_LIMIT_SIZE - 60 * MB,
+                [up('n1.jpg')]: postMediaLimitSize() - 60 * MB,
             },
             stored: stored(),
         });
@@ -297,7 +293,9 @@ describe('PostsService.edit with uploads', () => {
                 [added],
                 actor,
             ),
-        ).rejects.toMatchObject({ response: { message: MEDIA_TOTAL_ERROR } });
+        ).rejects.toMatchObject({
+            response: { message: postMediaTotalError() },
+        });
         expect(posts.findByIdAndUpdate).not.toHaveBeenCalled();
         expect(existsSync(added.path)).toBe(false);
     });

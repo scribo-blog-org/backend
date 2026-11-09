@@ -3,7 +3,8 @@ import { randomUUID } from 'crypto';
 import { FilesService } from '../../files/files.service';
 import {
     POST_MEDIA_DIR,
-    POST_MEDIA_LIMIT_SIZE,
+    postMediaLimitSize,
+    postMediaTotalError,
     type PostMediaKind,
 } from '../../files/upload';
 import { fieldError } from '../../http/http-errors';
@@ -34,7 +35,6 @@ export type MediaItem = {
 
 export const MEDIA_PREFIXES = [POST_MEDIA_DIR, 'src/featured_image'];
 export const MAX_MEDIA_ITEMS = 10;
-export const MEDIA_TOTAL_ERROR = 'Media in one post cannot exceed 100 MB';
 export const MEDIA_FILE_MISSING_ERROR =
     'Media file was not uploaded with the post!';
 export const MEDIA_LINK_UNSUPPORTED_ERROR =
@@ -391,8 +391,8 @@ export class MediaService {
 
         let total = 0;
         for (const size of sizes.values()) total += size;
-        if (total > POST_MEDIA_LIMIT_SIZE) {
-            throw fieldError('media', MEDIA_TOTAL_ERROR, total);
+        if (total > postMediaLimitSize()) {
+            throw fieldError('media', postMediaTotalError(), total);
         }
         const unused = files.filter(
             (file) =>

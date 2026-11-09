@@ -8,9 +8,11 @@ import type { Request } from 'express';
 import { rm } from 'fs/promises';
 import { Observable, catchError, from, switchMap, throwError } from 'rxjs';
 import { fieldError } from '../http/http-errors';
-import { POST_MEDIA_BODY_OVERHEAD, POST_MEDIA_LIMIT_SIZE } from './upload';
-
-export const POST_MEDIA_TOTAL_ERROR = 'Media in one post cannot exceed 100 MB';
+import {
+    POST_MEDIA_BODY_OVERHEAD,
+    postMediaLimitSize,
+    postMediaTotalError,
+} from './upload';
 
 type UploadRequest = Request & {
     files?: Express.Multer.File[] | Record<string, Express.Multer.File[]>;
@@ -40,9 +42,9 @@ export class PostUploadsGuardInterceptor implements NestInterceptor {
         const length = Number(req.headers['content-length']);
         if (
             Number.isFinite(length) &&
-            length > POST_MEDIA_LIMIT_SIZE + POST_MEDIA_BODY_OVERHEAD
+            length > postMediaLimitSize() + POST_MEDIA_BODY_OVERHEAD
         ) {
-            throw fieldError('media', POST_MEDIA_TOTAL_ERROR, length);
+            throw fieldError('media', postMediaTotalError(), length);
         }
         return next.handle();
     }
