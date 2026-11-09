@@ -35,6 +35,13 @@ export type MediaItem = {
 export const MEDIA_PREFIXES = [POST_MEDIA_DIR, 'src/featured_image'];
 export const MAX_MEDIA_ITEMS = 10;
 export const MEDIA_TOTAL_ERROR = 'Media in one post cannot exceed 100 MB';
+export const MEDIA_FILE_MISSING_ERROR =
+    'Media file was not uploaded with the post!';
+
+export type ResolvedMedia = {
+    items: MediaItem[];
+    unused: Express.Multer.File[];
+};
 const MAX_URL_LENGTH = 2048;
 const MAX_TEXT = 300;
 const MAX_DIMENSION = 20_000;
@@ -212,9 +219,21 @@ export class MediaService {
         private readonly previews: LinkPreviewService,
     ) {}
 
-    async resolve(raw: unknown): Promise<MediaItem[] | undefined> {
+    async resolve(
+        raw: unknown,
+        files: Express.Multer.File[] = [],
+    ): Promise<MediaItem[] | undefined> {
+        return (await this.resolveWithFiles(raw, files))?.items;
+    }
+
+    async resolveWithFiles(
+        raw: unknown,
+        files: Express.Multer.File[] = [],
+    ): Promise<ResolvedMedia | undefined> {
         if (raw === undefined) return undefined;
-        if (raw === null || raw === '' || raw === 'null') return [];
+        if (raw === null || raw === '' || raw === 'null') {
+            return { items: [], unused: [...files] };
+        }
 
         let input: unknown = raw;
         if (typeof raw === 'string') {
@@ -224,7 +243,7 @@ export class MediaService {
                 throw fieldError('media', 'Incorrect media!', raw);
             }
         }
-        if (input === null) return [];
+        if (input === null) return { items: [], unused: [...files] };
         if (!Array.isArray(input)) {
             throw fieldError('media', 'Incorrect media!', raw);
         }
@@ -239,15 +258,28 @@ export class MediaService {
         const items: MediaItem[] = [];
         const ids = new Set<string>();
         const sizes = new Map<string, number>();
+        const byClientId = new Map<string, Express.Multer.File>();
+        for (const file of files) {
+            if (!byClientId.has(file.fieldname)) {
+                byClientId.set(file.fieldname, file);
+            }
+        }
+        const usedClientIds = new Set<string>();
         for (const entry of input) {
             if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
                 throw fieldError('media', 'Incorrect media!', entry);
             }
             const data = entry as Record<string, unknown>;
             const item =
-                data.type === 'embed'
-                    ? await this.resolveEmbed(data)
-                    : await this.resolveUpload(data);
+                data.upload !== undefined
+                    ? await this.resolveNewUpload(
+                          data,
+                          byClientId,
+                          usedClientIds,
+                      )
+                    : data.type === 'embed'
+                      ? await this.resolveEmbed(data)
+                      : await this.resolveUpload(data);
             let id =
                 typeof data.id === 'string' && ID_PATTERN.test(data.id)
                     ? data.id
@@ -266,7 +298,42 @@ export class MediaService {
         if (total > POST_MEDIA_LIMIT_SIZE) {
             throw fieldError('media', MEDIA_TOTAL_ERROR, total);
         }
-        return items;
+        const unused = files.filter(
+            (file) =>
+                byClientId.get(file.fieldname) !== file ||
+                !usedClientIds.has(file.fieldname),
+        );
+        return { items, unused };
+    }
+
+    private async resolveNewUpload(
+        data: Record<string, unknown>,
+        byClientId: Map<string, Express.Multer.File>,
+        used: Set<string>,
+    ): Promise<MediaItem> {
+        const clientId = typeof data.upload === 'string' ? data.upload : '';
+        if (!ID_PATTERN.test(clientId) || used.has(clientId)) {
+            throw fieldError('media', 'Incorrect media!', data.upload);
+        }
+        const file = byClientId.get(clientId);
+        if (!file) {
+            throw fieldError('media', MEDIA_FILE_MISSING_ERROR, clientId);
+        }
+        used.add(clientId);
+        const stored = await this.files.finalizePostMedia(file);
+        const item: MediaItem = {
+            id: '',
+            type: stored.type,
+            url: stored.url,
+            size: stored.size,
+        };
+        const width = dimension(data.width);
+        const height = dimension(data.height);
+        if (width && height) {
+            item.width = width;
+            item.height = height;
+        }
+        return item;
     }
 
     private async resolveUpload(

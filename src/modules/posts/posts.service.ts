@@ -24,13 +24,14 @@ import {
     postExcerpt,
     sanitizePostHtml,
 } from './post-html';
+import { discardFiles } from '../../files/post-uploads.interceptor';
 import { LoggerService } from '../../infra/logger.service';
 import { changeOf, compact } from '../../infra/log-helpers';
 import { parsePagination } from '../../http/pagination';
 import type { ListPostsQueryDto } from '../../http/query.dto';
 import { fieldError } from '../../http/http-errors';
 import { isMongoObjectId } from '../../http/mongo-id';
-import { Post } from '../../database/schemas/post.schema';
+import { Post, type PostDocument } from '../../database/schemas/post.schema';
 import { PostComment } from '../../database/schemas/post-comment.schema';
 import { UsersService } from '../users/users.service';
 import { CommentsService } from './comments.service';
@@ -265,23 +266,39 @@ export class PostsService {
 
     async create(
         data: { postContent?: string; media?: unknown },
+        files: Express.Multer.File[],
         actor: Actor,
     ) {
-        if (!hasPermission(actor, PERMISSIONS.CREATE_POST)) {
-            throw new ForbiddenException(
-                "You don't have permission to create a post",
+        let content: string;
+        let media: MediaItem[];
+        let unused: Express.Multer.File[];
+        let created: PostDocument;
+        try {
+            if (!hasPermission(actor, PERMISSIONS.CREATE_POST)) {
+                throw new ForbiddenException(
+                    "You don't have permission to create a post",
+                );
+            }
+
+            const resolved = await this.media.resolveWithFiles(
+                data.media,
+                files,
             );
+            media = resolved?.items ?? [];
+            unused = resolved ? resolved.unused : files;
+            content = this.cleanContent(data.postContent);
+            this.assertHasBody(content, media);
+
+            created = await this.posts.create({
+                author: actor.id,
+                content_text: content,
+                media,
+            });
+        } catch (error) {
+            await discardFiles(files);
+            throw error;
         }
-
-        const media = (await this.media.resolve(data.media)) ?? [];
-        const content = this.cleanContent(data.postContent);
-        this.assertHasBody(content, media);
-
-        const created = await this.posts.create({
-            author: actor.id,
-            content_text: content,
-            media,
-        });
+        await discardFiles(unused);
         await this.logger.action(
             'create_post',
             actor,
@@ -301,57 +318,79 @@ export class PostsService {
         });
         return presentPost(created.toObject());
     }
+    private findPostForEdit(id: string) {
+        return this.posts.findById(id).lean();
+    }
+
     async edit(
         id: string,
         data: { postContent?: string; media?: unknown },
+        files: Express.Multer.File[],
         actor: Actor,
     ) {
-        const post = await this.posts.findById(id).lean();
-        if (!post) {
-            throw new NotFoundException('Post not found!');
-        }
-        this.assertOwnerOrPermission(
-            post.author,
-            actor,
-            PERMISSIONS.EDIT_ANY_POST,
-            "You don't have permission to update a post",
-        );
+        let post: Awaited<ReturnType<typeof this.findPostForEdit>>;
+        let result: Awaited<ReturnType<typeof this.findPostForEdit>>;
+        let content: string;
+        let media: MediaItem[];
+        let previousMedia: MediaItem[];
+        let resolved: MediaItem[] | undefined;
+        let unused: Express.Multer.File[];
+        try {
+            post = await this.findPostForEdit(id);
+            if (!post) {
+                throw new NotFoundException('Post not found!');
+            }
+            this.assertOwnerOrPermission(
+                post.author,
+                actor,
+                PERMISSIONS.EDIT_ANY_POST,
+                "You don't have permission to update a post",
+            );
 
-        const update: Record<string, unknown> = {};
-        const unset: Record<string, 1> = {};
-        let content = String(post.content_text ?? '');
-        if (data.postContent !== undefined) {
-            content = this.cleanContent(data.postContent);
-            update.content_text = content;
-        }
+            const update: Record<string, unknown> = {};
+            const unset: Record<string, 1> = {};
+            content = String(post.content_text ?? '');
+            if (data.postContent !== undefined) {
+                content = this.cleanContent(data.postContent);
+                update.content_text = content;
+            }
 
-        const previousMedia = legacyMedia(post);
-        let media = previousMedia;
-        const resolved = await this.media.resolve(data.media);
-        if (resolved !== undefined) {
-            media = resolved;
-            update.media = resolved;
-            if (post.featured_image) unset.featured_image = 1;
-        }
-        if ('title' in post) unset.title = 1;
-        if (data.postContent !== undefined || resolved !== undefined) {
-            this.assertHasBody(content, media);
-        }
+            previousMedia = legacyMedia(post);
+            media = previousMedia;
+            const withFiles = await this.media.resolveWithFiles(
+                data.media,
+                files,
+            );
+            resolved = withFiles?.items;
+            unused = withFiles ? withFiles.unused : files;
+            if (resolved !== undefined) {
+                media = resolved;
+                update.media = resolved;
+                if (post.featured_image) unset.featured_image = 1;
+            }
+            if ('title' in post) unset.title = 1;
+            if (data.postContent !== undefined || resolved !== undefined) {
+                this.assertHasBody(content, media);
+            }
 
-        const result = await this.posts
-            .findByIdAndUpdate(
-                id,
-                {
-                    $set: update,
-                    ...(Object.keys(unset).length ? { $unset: unset } : {}),
-                },
-                { returnDocument: 'after' },
-            )
-            .lean();
-        if (!result) {
-            throw new NotFoundException('Post not found!');
+            result = await this.posts
+                .findByIdAndUpdate(
+                    id,
+                    {
+                        $set: update,
+                        ...(Object.keys(unset).length ? { $unset: unset } : {}),
+                    },
+                    { returnDocument: 'after' },
+                )
+                .lean();
+            if (!result) {
+                throw new NotFoundException('Post not found!');
+            }
+        } catch (error) {
+            await discardFiles(files);
+            throw error;
         }
-
+        await discardFiles(unused);
         const keep = new Set(this.mediaUrlsOf(result));
         await this.releaseMedia(
             this.mediaUrlsOf(post).filter((url) => !keep.has(url)),

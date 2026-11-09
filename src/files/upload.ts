@@ -1,4 +1,4 @@
-import { FileInterceptor } from '@nestjs/platform-express';
+import { AnyFilesInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import { randomBytes } from 'crypto';
 import { mkdirSync } from 'fs';
 import { diskStorage } from 'multer';
@@ -9,6 +9,8 @@ import { uploadsDir } from './files.config';
 export const UPLOAD_LIMIT_SIZE = 5 * 1024 * 1024;
 export const POST_MEDIA_LIMIT_SIZE = 100 * 1024 * 1024;
 export const POST_MEDIA_DIR = 'src/post_media';
+export const POST_MEDIA_MAX_FILES = 10;
+export const POST_MEDIA_BODY_OVERHEAD = 2 * 1024 * 1024;
 
 export const ALLOWED_IMAGE_MIME_TYPES = [
     'image/jpeg',
@@ -94,13 +96,16 @@ export function imageFileInterceptor(field: 'userAvatar' | 'groupPhoto') {
     });
 }
 
-export function postMediaFileInterceptor() {
+export function postMediaFilesInterceptor() {
     const destination = path.join(
         uploadsDir({ get: (key: string) => process.env[key] }),
         POST_MEDIA_DIR,
     );
-    return FileInterceptor('file', {
-        limits: { fileSize: POST_MEDIA_LIMIT_SIZE, files: 1 },
+    return AnyFilesInterceptor({
+        limits: {
+            fileSize: POST_MEDIA_LIMIT_SIZE,
+            files: POST_MEDIA_MAX_FILES,
+        },
         storage: diskStorage({
             destination: (_req, _file, callback) => {
                 try {

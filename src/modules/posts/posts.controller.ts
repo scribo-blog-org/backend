@@ -8,11 +8,10 @@ import {
     Post,
     Query,
     Req,
-    UploadedFile,
+    UploadedFiles,
     UseInterceptors,
 } from '@nestjs/common';
-import { NoFilesInterceptor } from '@nestjs/platform-express';
-import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { CurrentUser } from '../../authz/decorators/current-user.decorator';
 import { OptionalAuth, Public } from '../../authz/decorators/public.decorator';
@@ -23,8 +22,11 @@ import { RateLimits } from '../../http/rate-limit.guard';
 import { clientIp } from '../../visitor/geo';
 import { ParseMongoIdPipe } from '../../http/mongo-id';
 import { ListPostsQueryDto } from '../../http/query.dto';
-import { FilesService } from '../../files/files.service';
-import { postMediaFileInterceptor } from '../../files/upload';
+import {
+    PostUploadsCleanupInterceptor,
+    PostUploadsGuardInterceptor,
+} from '../../files/post-uploads.interceptor';
+import { postMediaFilesInterceptor } from '../../files/upload';
 import { CommentsService } from './comments.service';
 import { CreateCommentDto, CreatePostDto, EditPostDto } from './dto/posts.dto';
 import { PostsService } from './posts.service';
@@ -35,7 +37,6 @@ export class PostsController {
     constructor(
         private readonly posts: PostsService,
         private readonly comments: CommentsService,
-        private readonly files: FilesService,
     ) {}
 
     @Public()
@@ -55,35 +56,22 @@ export class PostsController {
     })
     @Post()
     @ApiConsumes('application/json', 'multipart/form-data')
-    @UseInterceptors(NoFilesInterceptor())
-    async create(@Body() dto: CreatePostDto, @CurrentUser() actor: Actor) {
-        const data = await this.posts.create(dto, actor);
+    @UseInterceptors(
+        PostUploadsGuardInterceptor,
+        postMediaFilesInterceptor(),
+        PostUploadsCleanupInterceptor,
+    )
+    async create(
+        @Req() req: Request,
+        @Body() dto: CreatePostDto,
+        @UploadedFiles() files: Express.Multer.File[] | undefined,
+        @CurrentUser() actor: Actor,
+    ) {
+        (req as Request & { postUploadsOwned?: boolean }).postUploadsOwned =
+            true;
+        const data = await this.posts.create(dto, files ?? [], actor);
         return { status: true, message: 'Post created successfully!', data };
     }
-
-    @ApiBearerAuth()
-    @RequirePermissions(PERMISSIONS.CREATE_POST)
-    @RateLimits({
-        name: 'post-media',
-        windowMs: 60_000,
-        max: 20,
-        by: 'user',
-    })
-    @Post('media')
-    @ApiConsumes('multipart/form-data')
-    @ApiBody({
-        schema: {
-            type: 'object',
-            required: ['file'],
-            properties: { file: { type: 'string', format: 'binary' } },
-        },
-    })
-    @UseInterceptors(postMediaFileInterceptor())
-    async uploadMedia(@UploadedFile() file: Express.Multer.File | undefined) {
-        const data = await this.files.finalizePostMedia(file);
-        return { status: true, message: 'File uploaded successfully!', data };
-    }
-
     @Public()
     @Get(':id/comments')
     async listComments(
@@ -174,13 +162,21 @@ export class PostsController {
     @ApiBearerAuth()
     @Patch(':id')
     @ApiConsumes('application/json', 'multipart/form-data')
-    @UseInterceptors(NoFilesInterceptor())
+    @UseInterceptors(
+        PostUploadsGuardInterceptor,
+        postMediaFilesInterceptor(),
+        PostUploadsCleanupInterceptor,
+    )
     async edit(
+        @Req() req: Request,
         @Param('id', ParseMongoIdPipe) id: string,
         @Body() dto: EditPostDto,
+        @UploadedFiles() files: Express.Multer.File[] | undefined,
         @CurrentUser() actor: Actor,
     ) {
-        const data = await this.posts.edit(id, dto, actor);
+        (req as Request & { postUploadsOwned?: boolean }).postUploadsOwned =
+            true;
+        const data = await this.posts.edit(id, dto, files ?? [], actor);
         return { status: true, message: 'Post updated successfully', data };
     }
 

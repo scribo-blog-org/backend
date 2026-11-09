@@ -2,6 +2,7 @@ import type { FilesService } from '../../files/files.service';
 import { POST_MEDIA_LIMIT_SIZE } from '../../files/upload';
 import type { LinkPreviewService } from '../link-preview/link-preview.service';
 import {
+    MEDIA_FILE_MISSING_ERROR,
     MEDIA_TOTAL_ERROR,
     MediaService,
     classifyEmbedUrl,
@@ -28,6 +29,12 @@ function build(
                 ? url
                 : null,
         uploadSize: async (url: string) => sizes[url] ?? null,
+        finalizePostMedia: async (file: Express.Multer.File) => ({
+            type: file.mimetype === 'image/gif' ? 'gif' : 'image',
+            url: up(file.filename),
+            mime: file.mimetype,
+            size: sizes[up(file.filename)] ?? file.size,
+        }),
     } as unknown as FilesService;
     const previews = { fetchPreview: preview } as unknown as LinkPreviewService;
     return { service: new MediaService(files, previews), preview };
@@ -258,6 +265,113 @@ describe('MediaService.resolve', () => {
     });
 });
 
+describe('MediaService.resolveWithFiles', () => {
+    const part = (
+        fieldname: string,
+        extra: Partial<Express.Multer.File> = {},
+    ) =>
+        ({
+            fieldname,
+            filename: `${fieldname}.jpg`,
+            mimetype: 'image/jpeg',
+            size: 100,
+            path: `/tmp/${fieldname}.jpg`,
+            ...extra,
+        }) as Express.Multer.File;
+
+    it('maps upload items to the file part with the same client id', async () => {
+        const { service } = build();
+        const result = await service.resolveWithFiles(
+            JSON.stringify([
+                { upload: 'second' },
+                { upload: 'first', width: 10, height: 20 },
+            ]),
+            [part('first'), part('second', { mimetype: 'image/gif' })],
+        );
+        expect(
+            result?.items.map((item) => [item.type, item.url, item.width]),
+        ).toEqual([
+            ['gif', up('second.jpg'), undefined],
+            ['image', up('first.jpg'), 10],
+        ]);
+        expect(result?.unused).toEqual([]);
+    });
+
+    it('reports file parts nobody referenced as unused', async () => {
+        const { service } = build();
+        const stray = part('stray');
+        const result = await service.resolveWithFiles(
+            JSON.stringify([{ upload: 'a' }]),
+            [part('a'), stray],
+        );
+        expect(result?.unused).toEqual([stray]);
+    });
+
+    it('fails with a clear error when the file part is missing', async () => {
+        const { service } = build();
+        await expect(
+            service.resolveWithFiles(JSON.stringify([{ upload: 'ghost' }]), []),
+        ).rejects.toMatchObject({
+            response: { message: MEDIA_FILE_MISSING_ERROR, field: 'media' },
+        });
+    });
+
+    it('rejects referencing the same file part twice and bad client ids', async () => {
+        const { service } = build();
+        await expect(
+            service.resolveWithFiles(
+                JSON.stringify([{ upload: 'a' }, { upload: 'a' }]),
+                [part('a')],
+            ),
+        ).rejects.toMatchObject({ response: { message: 'Incorrect media!' } });
+        await expect(
+            service.resolveWithFiles(JSON.stringify([{ upload: '../x' }]), [
+                part('../x'),
+            ]),
+        ).rejects.toMatchObject({ response: { message: 'Incorrect media!' } });
+    });
+
+    it('sums new and kept files together against 100 MB', async () => {
+        const { service } = build({
+            [up('keep.jpg')]: 70 * MB,
+            [up('new.jpg')]: 40 * MB,
+        });
+        await expect(
+            service.resolveWithFiles(
+                JSON.stringify([
+                    { type: 'image', url: up('keep.jpg') },
+                    { upload: 'new' },
+                ]),
+                [part('new')],
+            ),
+        ).rejects.toMatchObject({ response: { message: MEDIA_TOTAL_ERROR } });
+    });
+
+    it('mixes kept files, new uploads and embeds', async () => {
+        const { service } = build({ [up('keep.jpg')]: 5 });
+        const result = await service.resolveWithFiles(
+            JSON.stringify([
+                { id: 'k', type: 'image', url: up('keep.jpg') },
+                { upload: 'n' },
+                { type: 'embed', url: 'https://youtu.be/dQw4w9WgXcQ' },
+            ]),
+            [part('n')],
+        );
+        expect(result?.items.map((item) => item.type)).toEqual([
+            'image',
+            'image',
+            'embed',
+        ]);
+        expect(result?.items[0].id).toBe('k');
+    });
+
+    it('treats every file as unused when media is cleared', async () => {
+        const { service } = build();
+        const stray = part('a');
+        const result = await service.resolveWithFiles('[]', [stray]);
+        expect(result).toEqual({ items: [], unused: [stray] });
+    });
+});
 describe('classifyEmbedUrl', () => {
     it('recognises short and shorts YouTube links', () => {
         expect(
