@@ -3,6 +3,7 @@ import { POST_MEDIA_LIMIT_SIZE } from '../../files/upload';
 import type { LinkPreviewService } from '../link-preview/link-preview.service';
 import {
     MEDIA_FILE_MISSING_ERROR,
+    MEDIA_LINK_UNSUPPORTED_ERROR,
     MEDIA_TOTAL_ERROR,
     MediaService,
     classifyEmbedUrl,
@@ -200,23 +201,108 @@ describe('MediaService.resolve', () => {
         expect(preview).not.toHaveBeenCalled();
     });
 
-    it('resolves other links through the link preview as a link card', async () => {
+    it('rejects ordinary page links instead of making a link card', async () => {
         const { service, preview } = build();
-        const [item] = (await service.resolve([
-            { type: 'embed', url: 'https://example.com/page' },
-        ]))!;
+        await expect(
+            service.resolve([
+                { type: 'embed', url: 'https://example.com/page' },
+            ]),
+        ).rejects.toMatchObject({
+            response: { message: MEDIA_LINK_UNSUPPORTED_ERROR },
+        });
         expect(preview).toHaveBeenCalledWith('https://example.com/page');
-        expect(item).toMatchObject({
-            type: 'embed',
-            embed: {
-                provider: 'link',
-                title: 'Example',
-                description: 'Desc',
-                thumbnail: 'https://example.com/og.png',
+    });
+
+    it('turns Twitch videos, clips and channels into players', async () => {
+        const { service, preview } = build(
+            {},
+            jest.fn().mockResolvedValue({
+                url: 'x',
+                title: 't',
+                description: '',
+                image: 'https://static-cdn.jtvnw.net/thumb.jpg',
+                site_name: 'twitch.tv',
+            }),
+        );
+        const items = (await service.resolve([
+            { type: 'embed', url: 'https://www.twitch.tv/videos/123456789' },
+            {
+                type: 'embed',
+                url: 'https://www.twitch.tv/fleem_ff/clip/Slug-Name_1',
             },
+            { type: 'embed', url: 'https://clips.twitch.tv/Slug-Name_2' },
+            { type: 'embed', url: 'https://m.twitch.tv/Fleem_FF' },
+        ]))!;
+        expect(items.map((item) => [item.url, item.embed?.embed_url])).toEqual([
+            [
+                'https://www.twitch.tv/videos/123456789',
+                'https://player.twitch.tv/?video=v123456789',
+            ],
+            [
+                'https://clips.twitch.tv/Slug-Name_1',
+                'https://clips.twitch.tv/embed?clip=Slug-Name_1',
+            ],
+            [
+                'https://clips.twitch.tv/Slug-Name_2',
+                'https://clips.twitch.tv/embed?clip=Slug-Name_2',
+            ],
+            [
+                'https://www.twitch.tv/fleem_ff',
+                'https://player.twitch.tv/?channel=fleem_ff',
+            ],
+        ]);
+        expect(items.every((item) => item.embed?.provider === 'twitch')).toBe(
+            true,
+        );
+        expect(items[0].embed?.thumbnail).toBe(
+            'https://static-cdn.jtvnw.net/thumb.jpg',
+        );
+        expect(preview).toHaveBeenCalledTimes(4);
+    });
+
+    it('still saves a Twitch player when the thumbnail lookup fails', async () => {
+        const { service } = build(
+            {},
+            jest.fn().mockRejectedValue(new Error('down')),
+        );
+        const [item] = (await service.resolve([
+            { type: 'embed', url: 'https://www.twitch.tv/fleem_ff' },
+        ]))!;
+        expect(item.embed).toEqual({
+            provider: 'twitch',
+            embed_url: 'https://player.twitch.tv/?channel=fleem_ff',
         });
     });
 
+    it('does not treat reserved Twitch paths as channels', async () => {
+        const { service } = build();
+        await expect(
+            service.resolve([
+                { type: 'embed', url: 'https://www.twitch.tv/directory' },
+            ]),
+        ).rejects.toMatchObject({
+            response: { message: MEDIA_LINK_UNSUPPORTED_ERROR },
+        });
+    });
+
+    it('keeps a legacy link card that is already stored on the post', async () => {
+        const { service } = build();
+        const legacy = {
+            id: 'old',
+            type: 'embed' as const,
+            url: 'https://example.com/page',
+            embed: {
+                provider: 'link' as const,
+                embed_url: 'https://example.com/page',
+                title: 'Example',
+            },
+        };
+        const items = (await service.resolve([legacy], [], [legacy]))!;
+        expect(items).toEqual([legacy]);
+        await expect(service.resolve([legacy])).rejects.toMatchObject({
+            response: { message: MEDIA_LINK_UNSUPPORTED_ERROR },
+        });
+    });
     it('maps extensionless links that serve an image to external media', async () => {
         const { service, preview } = build();
         preview.mockResolvedValueOnce({
@@ -237,7 +323,7 @@ describe('MediaService.resolve', () => {
         });
     });
 
-    it('reports links the server cannot embed', async () => {
+    it('rejects links the server cannot fetch', async () => {
         const { service } = build(
             {},
             jest.fn().mockRejectedValue(new Error('blocked')),
@@ -245,7 +331,7 @@ describe('MediaService.resolve', () => {
         await expect(
             service.resolve([{ type: 'embed', url: 'http://10.0.0.1/' }]),
         ).rejects.toMatchObject({
-            response: { message: 'This link cannot be embedded!' },
+            response: { message: MEDIA_LINK_UNSUPPORTED_ERROR },
         });
     });
 
@@ -384,6 +470,39 @@ describe('classifyEmbedUrl', () => {
         expect(
             classifyEmbedUrl(new URL('https://youtube.com/shorts/dQw4w9WgXcQ')),
         ).toMatchObject({ kind: 'embed', provider: 'youtube' });
+    });
+
+    it('classifies Twitch videos, clips and channels', () => {
+        expect(
+            classifyEmbedUrl(new URL('https://www.twitch.tv/videos/123456')),
+        ).toEqual({ kind: 'embed', provider: 'twitch', id: 'video:123456' });
+        expect(
+            classifyEmbedUrl(new URL('https://twitch.tv/a_b_c/clip/SlugX')),
+        ).toEqual({ kind: 'embed', provider: 'twitch', id: 'clip:SlugX' });
+        expect(
+            classifyEmbedUrl(new URL('https://clips.twitch.tv/SlugX')),
+        ).toEqual({ kind: 'embed', provider: 'twitch', id: 'clip:SlugX' });
+        expect(
+            classifyEmbedUrl(new URL('https://m.twitch.tv/Some_Name')),
+        ).toEqual({
+            kind: 'embed',
+            provider: 'twitch',
+            id: 'channel:some_name',
+        });
+    });
+
+    it('leaves reserved or foreign Twitch paths as plain links', () => {
+        for (const link of [
+            'https://www.twitch.tv/directory',
+            'https://www.twitch.tv/settings',
+            'https://www.twitch.tv/videos/abc',
+            'https://www.twitch.tv/a/b/c/d',
+            'https://nottwitch.tv/some_name',
+            'https://twitch.tv.evil.io/some_name',
+            'https://clips.twitch.tv/embed',
+        ]) {
+            expect(classifyEmbedUrl(new URL(link))).toEqual({ kind: 'link' });
+        }
     });
 
     it('does not treat look-alike hosts as providers', () => {

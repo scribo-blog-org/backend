@@ -10,6 +10,37 @@ export type PreviewResult = {
     media_type?: 'image' | 'gif' | 'video' | null;
 };
 
+const NAMED_ENTITIES: Record<string, string> = {
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'",
+    nbsp: ' ',
+};
+
+export function decodeHtmlEntities(value: string): string {
+    return value.replace(
+        /&(#x[0-9a-f]+|#\d+|[a-z]+);/gi,
+        (match, entity: string) => {
+            if (entity[0] === '#') {
+                const code =
+                    entity[1].toLowerCase() === 'x'
+                        ? parseInt(entity.slice(2), 16)
+                        : parseInt(entity.slice(1), 10);
+                if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) {
+                    return match;
+                }
+                try {
+                    return String.fromCodePoint(code);
+                } catch {
+                    return match;
+                }
+            }
+            return NAMED_ENTITIES[entity.toLowerCase()] ?? match;
+        },
+    );
+}
 const MAX_REDIRECTS = 4;
 const MAX_BYTES = 250_000;
 
@@ -34,7 +65,7 @@ export class LinkPreviewService {
         for (const pattern of patterns) {
             const match = html.match(pattern);
             if (match?.[1]) {
-                return match[1].trim();
+                return decodeHtmlEntities(match[1]).trim();
             }
         }
 
@@ -164,7 +195,9 @@ export class LinkPreviewService {
         const title =
             this.readMeta(html, 'og:title') ||
             this.readMeta(html, 'twitter:title') ||
-            html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim() ||
+            decodeHtmlEntities(
+                html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1] ?? '',
+            ).trim() ||
             parsed.hostname;
         const description =
             this.readMeta(html, 'og:description') ||

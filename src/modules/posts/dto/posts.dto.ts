@@ -3,7 +3,7 @@ import { IsOptional, IsString } from 'class-validator';
 import { IsCommentText, IsPostContent } from '../../../validation/field-rules';
 
 const MEDIA_DOC =
-    "Media: JSON array (max 10) sent as a JSON string in multipart/form-data. Items: { upload: '<clientId>', width?, height? } for a new file (the file goes in the same request as a file part named <clientId>; image/jpeg|png|webp|avif|gif or video/mp4|webm|quicktime, <= 100 MB each), { id, type, url } for a file that is already on the post (edit), { type: 'embed', url } for any http(s) link. Total uploaded size per post <= 100 MB. [] removes all media.";
+    "Media: JSON array (max 10) sent as a JSON string in multipart/form-data. Items: { upload: '<clientId>', width?, height? } for a new file (the file goes in the same request as a file part named <clientId>; image/jpeg|png|webp|avif|gif or video/mp4|webm|quicktime, <= 100 MB each), { id, type, url } for a file that is already on the post (edit), { type: 'embed', url } for a media link: a direct image/video/gif URL (also extensionless ones that serve image/* or video/*) or a YouTube, Vimeo, Dailymotion or Twitch URL (shown as a player). Any other link is rejected; paste it into the text instead. Total uploaded size per post <= 100 MB. [] removes all media.";
 
 export class CreatePostDto {
     @ApiProperty({ required: false })

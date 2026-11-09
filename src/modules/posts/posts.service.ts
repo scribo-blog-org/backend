@@ -360,6 +360,7 @@ export class PostsService {
             const withFiles = await this.media.resolveWithFiles(
                 data.media,
                 files,
+                previousMedia,
             );
             resolved = withFiles?.items;
             unused = withFiles ? withFiles.unused : files;
