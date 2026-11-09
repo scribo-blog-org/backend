@@ -335,6 +335,14 @@ export class MediaService {
 
         try {
             const preview = await this.previews.fetchPreview(url.href);
+            if (preview.media_type) {
+                return {
+                    id: '',
+                    type: preview.media_type,
+                    url: preview.url,
+                    external: true,
+                };
+            }
             return {
                 id: '',
                 type: 'embed',

@@ -210,6 +210,26 @@ describe('MediaService.resolve', () => {
         });
     });
 
+    it('maps extensionless links that serve an image to external media', async () => {
+        const { service, preview } = build();
+        preview.mockResolvedValueOnce({
+            url: 'https://img.example.com/images?id=1',
+            title: 'img.example.com',
+            description: '',
+            image: 'https://img.example.com/images?id=1',
+            site_name: 'img.example.com',
+            media_type: 'image',
+        });
+        const [item] = (await service.resolve([
+            { type: 'embed', url: 'https://img.example.com/images?id=1' },
+        ]))!;
+        expect(item).toMatchObject({
+            type: 'image',
+            url: 'https://img.example.com/images?id=1',
+            external: true,
+        });
+    });
+
     it('reports links the server cannot embed', async () => {
         const { service } = build(
             {},

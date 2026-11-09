@@ -7,6 +7,7 @@ export type PreviewResult = {
     description: string;
     image: string | null;
     site_name: string | null;
+    media_type?: 'image' | 'gif' | 'video' | null;
 };
 
 const MAX_REDIRECTS = 4;
@@ -88,7 +89,7 @@ export class LinkPreviewService {
                     headers: {
                         'User-Agent':
                             'Mozilla/5.0 (compatible; ScriboBot/1.0; +https://scribo-blog.vercel.app)',
-                        Accept: 'text/html,application/xhtml+xml',
+                        Accept: 'text/html,application/xhtml+xml,image/*,video/*;q=0.8',
                     },
                     signal: AbortSignal.timeout(8000),
                     redirect: 'manual',
@@ -136,6 +137,27 @@ export class LinkPreviewService {
         const response = await this.fetchSafe(parsed);
         if (!response || !response.ok) {
             return fallback;
+        }
+
+        const contentType = (response.headers.get('content-type') || '')
+            .split(';')[0]
+            .trim()
+            .toLowerCase();
+        if (
+            contentType.startsWith('image/') ||
+            contentType.startsWith('video/')
+        ) {
+            await response.body?.cancel().catch(() => undefined);
+            const isVideo = contentType.startsWith('video/');
+            return {
+                ...fallback,
+                image: isVideo ? null : parsed.href,
+                media_type: isVideo
+                    ? 'video'
+                    : contentType === 'image/gif'
+                      ? 'gif'
+                      : 'image',
+            };
         }
 
         const html = await this.readCapped(response);
