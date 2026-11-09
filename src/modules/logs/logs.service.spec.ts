@@ -15,7 +15,6 @@ describe('LogsQueryService user filter', () => {
             {} as never,
             {} as never,
             {} as never,
-            {} as never,
         );
 
         await service.list({ user: 'plain-id' } as never, admin);
@@ -39,7 +38,6 @@ describe('conversation filter', () => {
         const model = { find, countDocuments: jest.fn().mockResolvedValue(0) };
         const service = new LogsQueryService(
             model as never,
-            {} as never,
             {} as never,
             {} as never,
             {} as never,
@@ -97,7 +95,6 @@ describe('search', () => {
         const model = { find, countDocuments: jest.fn().mockResolvedValue(0) };
         const service = new LogsQueryService(
             model as never,
-            {} as never,
             {} as never,
             {} as never,
             {} as never,

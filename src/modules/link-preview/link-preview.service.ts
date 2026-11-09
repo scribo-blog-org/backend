@@ -1,12 +1,16 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { assertPublicUrl } from './ssrf';
 
-type PreviewResult = {
+export type PreviewResult = {
     url: string;
     title: string;
     description: string;
     image: string | null;
     site_name: string | null;
 };
+
+const MAX_REDIRECTS = 4;
+const MAX_BYTES = 250_000;
 
 @Injectable()
 export class LinkPreviewService {
@@ -42,10 +46,70 @@ export class LinkPreviewService {
         }
 
         try {
-            return new URL(value, base).href;
+            const resolved = new URL(value, base);
+            if (!['http:', 'https:'].includes(resolved.protocol)) {
+                return null;
+            }
+            return resolved.href;
         } catch {
             return null;
         }
+    }
+
+    private async readCapped(response: Response): Promise<string> {
+        if (!response.body) return '';
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let total = 0;
+        try {
+            while (total < MAX_BYTES) {
+                const { done, value } = await reader.read();
+                if (done || !value) break;
+                chunks.push(value);
+                total += value.byteLength;
+            }
+        } finally {
+            await reader.cancel().catch(() => undefined);
+        }
+        return Buffer.concat(chunks).toString('utf8').slice(0, MAX_BYTES);
+    }
+
+    private async fetchSafe(start: URL): Promise<Response | null> {
+        let current = start;
+        for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+            try {
+                await assertPublicUrl(current);
+            } catch {
+                throw new BadRequestException('Invalid URL');
+            }
+            let response: Response;
+            try {
+                response = await fetch(current.href, {
+                    headers: {
+                        'User-Agent':
+                            'Mozilla/5.0 (compatible; ScriboBot/1.0; +https://scribo-blog.vercel.app)',
+                        Accept: 'text/html,application/xhtml+xml',
+                    },
+                    signal: AbortSignal.timeout(8000),
+                    redirect: 'manual',
+                });
+            } catch {
+                return null;
+            }
+            if (response.status >= 300 && response.status < 400) {
+                const location = response.headers.get('location');
+                await response.body?.cancel().catch(() => undefined);
+                if (!location) return null;
+                try {
+                    current = new URL(location, current);
+                } catch {
+                    return null;
+                }
+                continue;
+            }
+            return response;
+        }
+        return null;
     }
 
     async fetchPreview(rawUrl: string): Promise<PreviewResult> {
@@ -69,26 +133,12 @@ export class LinkPreviewService {
             site_name: parsed.hostname || null,
         };
 
-        let response: Response;
-        try {
-            response = await fetch(parsed.href, {
-                headers: {
-                    'User-Agent':
-                        'Mozilla/5.0 (compatible; ScriboBot/1.0; +https://scribo-blog.vercel.app)',
-                    Accept: 'text/html,application/xhtml+xml',
-                },
-                signal: AbortSignal.timeout(8000),
-                redirect: 'follow',
-            });
-        } catch {
+        const response = await this.fetchSafe(parsed);
+        if (!response || !response.ok) {
             return fallback;
         }
 
-        if (!response.ok) {
-            return fallback;
-        }
-
-        const html = (await response.text()).slice(0, 250_000);
+        const html = await this.readCapped(response);
         const title =
             this.readMeta(html, 'og:title') ||
             this.readMeta(html, 'twitter:title') ||

@@ -53,17 +53,6 @@ export function IsDescription() {
     });
 }
 
-export function IsPostTitle() {
-    return applyDecorators(
-        MinLength(FIELD_LIMITS.postTitle.min, {
-            message: 'Title is required!',
-        }),
-        MaxLength(FIELD_LIMITS.postTitle.max, {
-            message: `Title cannot be longer than ${FIELD_LIMITS.postTitle.max} characters!`,
-        }),
-    );
-}
-
 export function IsPostContent() {
     return applyDecorators(
         MinLength(FIELD_LIMITS.postContent.min, {
@@ -82,17 +71,6 @@ export function IsCommentText() {
         }),
         MaxLength(FIELD_LIMITS.comment.max, {
             message: `Comment cannot be longer than ${FIELD_LIMITS.comment.max} characters!`,
-        }),
-    );
-}
-
-export function IsCategoryName() {
-    return applyDecorators(
-        MinLength(FIELD_LIMITS.categoryName.min, {
-            message: 'Category name is required!',
-        }),
-        MaxLength(FIELD_LIMITS.categoryName.max, {
-            message: `Category name cannot be longer than ${FIELD_LIMITS.categoryName.max} characters!`,
         }),
     );
 }

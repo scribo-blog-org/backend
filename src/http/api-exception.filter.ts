@@ -46,7 +46,9 @@ export class ApiExceptionFilter implements ExceptionFilter {
             const field = exception.field || 'file';
             const message =
                 exception.code === 'LIMIT_FILE_SIZE'
-                    ? 'Max size of image should be 5 MB!'
+                    ? field === 'file'
+                        ? 'Max size of the file should be 100 MB!'
+                        : 'Max size of image should be 5 MB!'
                     : exception.message;
             response.status(HttpStatus.BAD_REQUEST).json({
                 status: false,

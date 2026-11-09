@@ -1,48 +1,32 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsOptional, IsString } from 'class-validator';
-import {
-    IsCommentText,
-    IsPostContent,
-    IsPostTitle,
-} from '../../../validation/field-rules';
+import { IsCommentText, IsPostContent } from '../../../validation/field-rules';
+
+const MEDIA_DOC =
+    "Media: JSON array (max 10) of { type: 'image'|'gif'|'video', url (from POST /posts/media), poster?, width?, height? } or { type: 'embed', url (any http(s) link) }. Send as JSON or as a JSON string in multipart. Total uploaded size per post <= 100 MB. [] removes all media.";
 
 export class CreatePostDto {
-    @ApiProperty()
-    @IsString()
-    @IsPostTitle()
-    postTitle!: string;
-
-    @ApiProperty()
-    @IsString()
-    @IsPostContent()
-    postContent!: string;
-
-    @ApiProperty()
-    @IsString()
-    categoryId!: string;
-}
-
-export class EditPostDto {
-    @ApiProperty({ required: false })
-    @IsOptional()
-    @IsString()
-    @IsPostTitle()
-    postTitle?: string;
-
     @ApiProperty({ required: false })
     @IsOptional()
     @IsString()
     @IsPostContent()
     postContent?: string;
 
+    @ApiProperty({ required: false, description: MEDIA_DOC })
+    @IsOptional()
+    media?: unknown;
+}
+
+export class EditPostDto {
     @ApiProperty({ required: false })
     @IsOptional()
     @IsString()
-    categoryId?: string;
+    @IsPostContent()
+    postContent?: string;
 
-    @ApiProperty({ required: false })
+    @ApiProperty({ required: false, description: MEDIA_DOC })
     @IsOptional()
-    featuredImage?: unknown;
+    media?: unknown;
 }
 
 export class CreateCommentDto {

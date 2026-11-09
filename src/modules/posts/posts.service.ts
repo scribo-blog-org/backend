@@ -10,13 +10,26 @@ import { Model, Types } from 'mongoose';
 import { PERMISSIONS } from '../../authz/permissions';
 import { hasPermission, isResourceOwner, type Actor } from '../../authz/policy';
 import { FilesService } from '../../files/files.service';
+import {
+    MEDIA_PREFIXES,
+    MediaService,
+    legacyMedia,
+    presentPost,
+    type MediaItem,
+} from './media';
+import {
+    hasMediaMarkup,
+    htmlToText,
+    ownMediaUrls,
+    postExcerpt,
+    sanitizePostHtml,
+} from './post-html';
 import { LoggerService } from '../../infra/logger.service';
-import { categorySnapshot, changeOf, compact } from '../../infra/log-helpers';
+import { changeOf, compact } from '../../infra/log-helpers';
 import { parsePagination } from '../../http/pagination';
 import type { ListPostsQueryDto } from '../../http/query.dto';
 import { fieldError } from '../../http/http-errors';
 import { isMongoObjectId } from '../../http/mongo-id';
-import { Category } from '../../database/schemas/category.schema';
 import { Post } from '../../database/schemas/post.schema';
 import { PostComment } from '../../database/schemas/post-comment.schema';
 import { UsersService } from '../users/users.service';
@@ -31,15 +44,68 @@ export class PostsService {
         @InjectModel(Post.name) private readonly posts: Model<Post>,
         @InjectModel(PostComment.name)
         private readonly comments: Model<PostComment>,
-        @InjectModel(Category.name)
-        private readonly categories: Model<Category>,
         private readonly commentsService: CommentsService,
         private readonly usersService: UsersService,
         private readonly notifications: NotificationsService,
         private readonly mentionNotifications: MentionNotificationsService,
         private readonly files: FilesService,
+        private readonly media: MediaService,
         private readonly logger: LoggerService,
     ) {}
+
+    private cleanContent(html: string | undefined): string {
+        return sanitizePostHtml(html ?? '', (url) =>
+            this.files.ownUploadPath(url, MEDIA_PREFIXES),
+        );
+    }
+
+    private assertHasBody(content: string, media: MediaItem[]) {
+        if (media.length || htmlToText(content) || hasMediaMarkup(content)) {
+            return;
+        }
+        throw fieldError(
+            'postContent',
+            'Add some text or media to your post!',
+            content,
+        );
+    }
+
+    private mediaUrlsOf(post: {
+        media?: MediaItem[] | null;
+        featured_image?: string | null;
+        content_text?: string | null;
+    }): string[] {
+        const raw = [
+            ...legacyMedia(post).flatMap((item) =>
+                item.external
+                    ? []
+                    : [item.url, ...(item.poster ? [item.poster] : [])],
+            ),
+            ...ownMediaUrls(post.content_text),
+        ];
+        const urls = raw
+            .map((url) => this.files.ownUploadPath(url, MEDIA_PREFIXES))
+            .filter((url): url is string => Boolean(url));
+        return [...new Set(urls)];
+    }
+    private async releaseMedia(urls: string[], exceptPostId?: string) {
+        for (const url of urls) {
+            const referenced = await this.posts.exists({
+                ...(exceptPostId ? { _id: { $ne: exceptPostId } } : {}),
+                $or: [
+                    { 'media.url': url },
+                    { 'media.poster': url },
+                    { featured_image: url },
+                    {
+                        content_text: {
+                            $regex: url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+                        },
+                    },
+                ],
+            });
+            if (!referenced) await this.files.remove(url);
+        }
+    }
 
     private objectId(value?: string | string[], field = 'id') {
         if (value == null || value === '') return undefined;
@@ -85,9 +151,7 @@ export class PostsService {
         const { page, limit, skip } = parsePagination(query, 5, 50);
         const filter: Record<string, unknown> = {};
         const author = this.objectId(query.author, 'author');
-        const category = this.objectId(query.category, 'category');
         if (author) filter.author = author;
-        if (category) filter.category = category;
         if (query._id || query.ids || query.id) {
             const idsValue = query._id || query.ids || query.id;
             if (!String(idsValue || '').trim()) {
@@ -127,28 +191,15 @@ export class PostsService {
             );
         }
 
-        let categoryMap = new Map<string, unknown>();
-        if (expand.includes('category')) {
-            const cats = await this.categories
-                .find({
-                    _id: { $in: items.map((post) => post.category) },
-                })
-                .lean();
-            categoryMap = new Map(cats.map((cat) => [String(cat._id), cat]));
-        }
-
         return {
             items: items.map((post) => ({
-                ...post,
+                ...presentPost(post),
                 comments: commentsByPost.get(String(post._id)) || [],
                 comments_count: commentCounts.get(String(post._id)) || 0,
                 views_count: Number(post.views_count || 0),
                 author: expand.includes('author')
                     ? authorMap.get(String(post.author)) || null
                     : post.author,
-                category: expand.includes('category')
-                    ? categoryMap.get(String(post.category)) || null
-                    : post.category,
             })) as Record<string, unknown>[],
             pagination: {
                 page,
@@ -183,7 +234,7 @@ export class PostsService {
             post_id: { $in: [post._id, String(post._id)] },
         });
         const result: Record<string, unknown> = {
-            ...post,
+            ...presentPost(post),
             comments,
             comments_count: commentsCount,
             views_count: viewsCount,
@@ -193,11 +244,6 @@ export class PostsService {
                 post.author,
             ]);
             result.author = authors[0] || null;
-        }
-        if (flags.includes('category')) {
-            result.category = await this.categories
-                .findById(post.category)
-                .lean();
         }
         return result;
     }
@@ -218,8 +264,7 @@ export class PostsService {
     }
 
     async create(
-        data: { postTitle: string; postContent: string; categoryId: string },
-        featuredImage: Express.Multer.File | undefined,
+        data: { postContent?: string; media?: unknown },
         actor: Actor,
     ) {
         if (!hasPermission(actor, PERMISSIONS.CREATE_POST)) {
@@ -227,67 +272,38 @@ export class PostsService {
                 "You don't have permission to create a post",
             );
         }
-        const category = await this.categories.findById(data.categoryId).lean();
-        if (!category) {
-            throw fieldError(
-                'categoryId',
-                'Category not found!',
-                data.categoryId,
-            );
-        }
 
-        let imgUrl: string | null = null;
-        if (featuredImage && featuredImage.size !== 0) {
-            imgUrl = await this.files.saveImage(
-                featuredImage,
-                'featured_image',
-                Date.now().toString(),
-                'featuredImage',
-            );
-            if (!imgUrl) {
-                throw new InternalServerErrorException(
-                    'Error to upload image to storage!',
-                );
-            }
-        }
+        const media = (await this.media.resolve(data.media)) ?? [];
+        const content = this.cleanContent(data.postContent);
+        this.assertHasBody(content, media);
 
         const created = await this.posts.create({
             author: actor.id,
-            title: data.postTitle,
-            content_text: data.postContent,
-            category: data.categoryId,
-            ...(imgUrl ? { featured_image: imgUrl } : {}),
+            content_text: content,
+            media,
         });
         await this.logger.action(
             'create_post',
             actor,
             {
                 post: created._id,
-                post_title: data.postTitle,
-                category: category._id,
-                category_snapshot: categorySnapshot(category),
-                has_image: Boolean(imgUrl),
-                content_length: data.postContent.length,
+                post_title: postExcerpt(content),
+                has_image: media.length > 0,
+                media_count: media.length,
+                content_length: content.length,
             },
             `User ${actor.nick_name} created post`,
         );
         await this.mentionNotifications.notifyFromText({
             actorId: actor.id,
-            text: data.postContent,
+            text: content,
             postId: String(created._id),
         });
-        return created.toObject();
+        return presentPost(created.toObject());
     }
-
     async edit(
         id: string,
-        data: {
-            postTitle?: string;
-            postContent?: string;
-            categoryId?: string;
-            featuredImage?: unknown;
-        },
-        featuredImage: Express.Multer.File | undefined,
+        data: { postContent?: string; media?: unknown },
         actor: Actor,
     ) {
         const post = await this.posts.findById(id).lean();
@@ -302,95 +318,65 @@ export class PostsService {
         );
 
         const update: Record<string, unknown> = {};
-        let newCategory: {
-            name?: unknown;
-            icon?: unknown;
-            color?: unknown;
-        } | null = null;
-        if (data.postTitle !== undefined) update.title = data.postTitle;
-        if (data.postContent !== undefined)
-            update.content_text = data.postContent;
-        if (data.categoryId) {
-            const category = await this.categories
-                .findById(data.categoryId)
-                .lean();
-            if (!category) {
-                throw fieldError(
-                    'categoryId',
-                    'Category not found!',
-                    data.categoryId,
-                );
-            }
-            newCategory = category;
-            update.category = data.categoryId;
+        const unset: Record<string, 1> = {};
+        let content = String(post.content_text ?? '');
+        if (data.postContent !== undefined) {
+            content = this.cleanContent(data.postContent);
+            update.content_text = content;
         }
 
-        const shouldTouchImage =
-            featuredImage !== undefined ||
-            Object.prototype.hasOwnProperty.call(data, 'featuredImage');
-        if (shouldTouchImage) {
-            await this.files.remove(post.featured_image);
-            if (featuredImage && featuredImage.size !== 0) {
-                const uploaded = await this.files.saveImage(
-                    featuredImage,
-                    'featured_image',
-                    Date.now().toString(),
-                    'featuredImage',
-                );
-                if (!uploaded) {
-                    throw new InternalServerErrorException(
-                        'Error to upload image to storage!',
-                    );
-                }
-                update.featured_image = uploaded;
-            } else {
-                update.featured_image = null;
-            }
+        const previousMedia = legacyMedia(post);
+        let media = previousMedia;
+        const resolved = await this.media.resolve(data.media);
+        if (resolved !== undefined) {
+            media = resolved;
+            update.media = resolved;
+            if (post.featured_image) unset.featured_image = 1;
+        }
+        if ('title' in post) unset.title = 1;
+        if (data.postContent !== undefined || resolved !== undefined) {
+            this.assertHasBody(content, media);
         }
 
         const result = await this.posts
-            .findByIdAndUpdate(id, update, { returnDocument: 'after' })
+            .findByIdAndUpdate(
+                id,
+                {
+                    $set: update,
+                    ...(Object.keys(unset).length ? { $unset: unset } : {}),
+                },
+                { returnDocument: 'after' },
+            )
             .lean();
         if (!result) {
             throw new NotFoundException('Post not found!');
         }
-        const categoryChanged =
-            newCategory !== null &&
-            String(post.category) !== String(data.categoryId);
-        const oldCategory = categoryChanged
-            ? await this.categories
-                  .findById(post.category)
-                  .select('name icon color')
-                  .lean()
-            : null;
-        const imageChange = !shouldTouchImage
-            ? null
-            : update.featured_image
-              ? post.featured_image
-                  ? 'changed'
-                  : 'added'
-              : post.featured_image
-                ? 'removed'
-                : null;
+
+        const keep = new Set(this.mediaUrlsOf(result));
+        await this.releaseMedia(
+            this.mediaUrlsOf(post).filter((url) => !keep.has(url)),
+            id,
+        );
+
+        const mediaChange =
+            resolved === undefined ||
+            previousMedia.map((item) => item.url).join('|') ===
+                media.map((item) => item.url).join('|')
+                ? null
+                : !media.length
+                  ? 'removed'
+                  : previousMedia.length
+                    ? 'changed'
+                    : 'added';
         const changes = compact([
-            data.postTitle !== undefined
-                ? changeOf('title', post.title, data.postTitle)
-                : null,
-            categoryChanged
-                ? {
-                      field: 'category',
-                      from: oldCategory?.name ?? null,
-                      to: newCategory?.name ?? null,
-                  }
-                : null,
-            imageChange ? { field: 'image', to: imageChange } : null,
+            mediaChange ? { field: 'image', to: mediaChange } : null,
             data.postContent !== undefined &&
-            String(post.content_text ?? '') !== data.postContent
+            String(post.content_text ?? '') !== content
                 ? {
                       field: 'content',
                       changed: true,
                       from_length: String(post.content_text ?? '').length,
-                      to_length: data.postContent.length,
+                      to_length: content.length,
                   }
                 : null,
         ]);
@@ -400,13 +386,7 @@ export class PostsService {
                 actor,
                 {
                     post: result._id,
-                    post_title: result.title,
-                    category: result.category,
-                    category_snapshot: categorySnapshot(
-                        categoryChanged
-                            ? newCategory
-                            : (oldCategory ?? undefined),
-                    ),
+                    post_title: postExcerpt(content),
                     changes,
                     ...(isResourceOwner(post.author, actor.id)
                         ? {}
@@ -421,16 +401,15 @@ export class PostsService {
         if (data.postContent !== undefined) {
             await this.mentionNotifications.notifyNewMentions(
                 String(post.content_text || ''),
-                data.postContent,
+                content,
                 {
                     actorId: actor.id,
                     postId: id,
                 },
             );
         }
-        return result;
+        return presentPost(result);
     }
-
     async remove(id: string, actor: Actor) {
         const post = await this.posts.findById(id).lean();
         if (!post) {
@@ -456,7 +435,7 @@ export class PostsService {
         if (!result) {
             throw new InternalServerErrorException('Failed to delete post!');
         }
-        await this.files.remove(result.featured_image);
+        await this.releaseMedia(this.mediaUrlsOf(result), id);
 
         if (commentIds.length) {
             await this.usersService.removeNotifications({
@@ -468,19 +447,13 @@ export class PostsService {
             type: { $in: ['like_post', 'comment_post'] },
             post: id,
         });
-        const deletedCategory = await this.categories
-            .findById(result.category)
-            .select('name icon color')
-            .lean();
         await this.logger.action(
             'delete_post',
             actor,
             {
                 post: result._id,
-                post_title: result.title,
+                post_title: postExcerpt(result.content_text),
                 post_author: String(result.author),
-                category: result.category,
-                category_snapshot: categorySnapshot(deletedCategory),
                 comments_removed: commentIds.length,
                 likes_count: (result.likes ?? []).length,
                 views_count: result.views_count ?? 0,
@@ -490,7 +463,7 @@ export class PostsService {
             },
             `User ${actor.nick_name} deleted post ${id}`,
         );
-        return result;
+        return presentPost(result);
     }
 
     async save(id: string, actor: Actor) {
@@ -510,7 +483,7 @@ export class PostsService {
         const result = await this.usersService.addSavedPost(actor.id, id);
         await this.logger.action('save_post', actor, {
             post: id,
-            post_title: post.title,
+            post_title: postExcerpt(post.content_text),
         });
         return { saved_posts: result?.saved_posts };
     }
@@ -532,7 +505,7 @@ export class PostsService {
         const result = await this.usersService.removeSavedPost(actor.id, id);
         await this.logger.action('unsave_post', actor, {
             post: id,
-            post_title: post.title,
+            post_title: postExcerpt(post.content_text),
         });
         return { saved_posts: result?.saved_posts };
     }
@@ -564,7 +537,7 @@ export class PostsService {
             actor,
             {
                 post: id,
-                post_title: post.title,
+                post_title: postExcerpt(post.content_text),
                 post_author: String(post.author),
             },
             `User ${actor.nick_name} liked post ${id}`,
@@ -589,7 +562,7 @@ export class PostsService {
             .lean();
         await this.logger.action('unlike_post', actor, {
             post: id,
-            post_title: post.title,
+            post_title: postExcerpt(post.content_text),
             post_author: String(post.author),
         });
         return { likes: result?.likes };

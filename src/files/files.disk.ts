@@ -1,6 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { access, chmod, constants, mkdir, rm, writeFile } from 'fs/promises';
+import {
+    access,
+    chmod,
+    constants,
+    mkdir,
+    rm,
+    stat,
+    writeFile,
+} from 'fs/promises';
 import path from 'path';
 import { uploadsDir } from './files.config';
 
@@ -22,6 +30,15 @@ export class FilesDisk {
         await mkdir(path.dirname(target), { recursive: true, mode: 0o755 });
         await writeFile(target, data, { mode: 0o644 });
         await chmod(target, 0o644);
+    }
+
+    async size(key: string): Promise<number | null> {
+        try {
+            const info = await stat(this.resolve(key));
+            return info.isFile() ? info.size : null;
+        } catch {
+            return null;
+        }
     }
 
     async remove(key: string) {

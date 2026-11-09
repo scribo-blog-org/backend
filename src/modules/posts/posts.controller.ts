@@ -11,7 +11,8 @@ import {
     UploadedFile,
     UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
+import { NoFilesInterceptor } from '@nestjs/platform-express';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { CurrentUser } from '../../authz/decorators/current-user.decorator';
 import { OptionalAuth, Public } from '../../authz/decorators/public.decorator';
@@ -22,7 +23,8 @@ import { RateLimits } from '../../http/rate-limit.guard';
 import { clientIp } from '../../visitor/geo';
 import { ParseMongoIdPipe } from '../../http/mongo-id';
 import { ListPostsQueryDto } from '../../http/query.dto';
-import { imageFileInterceptor } from '../../files/upload';
+import { FilesService } from '../../files/files.service';
+import { postMediaFileInterceptor } from '../../files/upload';
 import { CommentsService } from './comments.service';
 import { CreateCommentDto, CreatePostDto, EditPostDto } from './dto/posts.dto';
 import { PostsService } from './posts.service';
@@ -33,6 +35,7 @@ export class PostsController {
     constructor(
         private readonly posts: PostsService,
         private readonly comments: CommentsService,
+        private readonly files: FilesService,
     ) {}
 
     @Public()
@@ -51,15 +54,34 @@ export class PostsController {
         by: 'user',
     })
     @Post()
-    @ApiConsumes('multipart/form-data')
-    @UseInterceptors(imageFileInterceptor('featuredImage'))
-    async create(
-        @Body() dto: CreatePostDto,
-        @UploadedFile() featuredImage: Express.Multer.File | undefined,
-        @CurrentUser() actor: Actor,
-    ) {
-        const data = await this.posts.create(dto, featuredImage, actor);
+    @ApiConsumes('application/json', 'multipart/form-data')
+    @UseInterceptors(NoFilesInterceptor())
+    async create(@Body() dto: CreatePostDto, @CurrentUser() actor: Actor) {
+        const data = await this.posts.create(dto, actor);
         return { status: true, message: 'Post created successfully!', data };
+    }
+
+    @ApiBearerAuth()
+    @RequirePermissions(PERMISSIONS.CREATE_POST)
+    @RateLimits({
+        name: 'post-media',
+        windowMs: 60_000,
+        max: 20,
+        by: 'user',
+    })
+    @Post('media')
+    @ApiConsumes('multipart/form-data')
+    @ApiBody({
+        schema: {
+            type: 'object',
+            required: ['file'],
+            properties: { file: { type: 'string', format: 'binary' } },
+        },
+    })
+    @UseInterceptors(postMediaFileInterceptor())
+    async uploadMedia(@UploadedFile() file: Express.Multer.File | undefined) {
+        const data = await this.files.finalizePostMedia(file);
+        return { status: true, message: 'File uploaded successfully!', data };
     }
 
     @Public()
@@ -151,15 +173,14 @@ export class PostsController {
 
     @ApiBearerAuth()
     @Patch(':id')
-    @ApiConsumes('multipart/form-data')
-    @UseInterceptors(imageFileInterceptor('featuredImage'))
+    @ApiConsumes('application/json', 'multipart/form-data')
+    @UseInterceptors(NoFilesInterceptor())
     async edit(
         @Param('id', ParseMongoIdPipe) id: string,
         @Body() dto: EditPostDto,
-        @UploadedFile() featuredImage: Express.Multer.File | undefined,
         @CurrentUser() actor: Actor,
     ) {
-        const data = await this.posts.edit(id, dto, featuredImage, actor);
+        const data = await this.posts.edit(id, dto, actor);
         return { status: true, message: 'Post updated successfully', data };
     }
 

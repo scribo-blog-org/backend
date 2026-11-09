@@ -1,10 +1,20 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { rm } from 'fs/promises';
 import path from 'path';
 import { fieldError } from '../http/http-errors';
 import { UPLOADS_URL_PATH, uploadsPublicUrl } from './files.config';
 import { FilesDisk } from './files.disk';
-import { ALLOWED_IMAGE_MIME_TYPES, UPLOAD_LIMIT_SIZE } from './upload';
+import { detectMime, mimeMatches, readHead } from './magic';
+import {
+    ALLOWED_IMAGE_MIME_TYPES,
+    POST_MEDIA_DIR,
+    POST_MEDIA_LIMIT_SIZE,
+    POST_MEDIA_TYPE_ERROR,
+    UPLOAD_LIMIT_SIZE,
+    postMediaKind,
+    type PostMediaKind,
+} from './upload';
 
 export type ImageKind = 'avatar' | 'featured_image' | 'group';
 export type ImageField = 'userAvatar' | 'featuredImage' | 'groupPhoto';
@@ -57,6 +67,83 @@ export class FilesService {
             );
         }
         return `${UPLOADS_URL_PATH}/${key}`;
+    }
+
+    async finalizePostMedia(file: Express.Multer.File | undefined): Promise<{
+        type: PostMediaKind;
+        url: string;
+        mime: string;
+        size: number;
+    }> {
+        if (!file) {
+            throw fieldError('file', 'File is required!', null);
+        }
+        const discard = async () => {
+            if (file.path) {
+                await rm(file.path, { force: true }).catch(() => undefined);
+            }
+        };
+        const kind = postMediaKind(file.mimetype);
+        if (!kind) {
+            await discard();
+            throw fieldError('file', POST_MEDIA_TYPE_ERROR, file.mimetype);
+        }
+        if (file.size > POST_MEDIA_LIMIT_SIZE) {
+            await discard();
+            throw fieldError(
+                'file',
+                `Max size of the file should be ${POST_MEDIA_LIMIT_SIZE / 1024 / 1024} MB!`,
+                file.size,
+            );
+        }
+        if (!file.path || !file.filename) {
+            throw new InternalServerErrorException(
+                'Error to upload file to storage!',
+            );
+        }
+        let detected: string | null;
+        try {
+            detected = detectMime(await readHead(file.path));
+        } catch {
+            await discard();
+            throw new InternalServerErrorException(
+                'Error to upload file to storage!',
+            );
+        }
+        if (!mimeMatches(file.mimetype, detected)) {
+            await discard();
+            throw fieldError(
+                'file',
+                'File content does not match its type!',
+                file.mimetype,
+            );
+        }
+        return {
+            type: kind,
+            url: `${UPLOADS_URL_PATH}/${POST_MEDIA_DIR}/${file.filename}`,
+            mime: file.mimetype,
+            size: file.size,
+        };
+    }
+
+    ownUploadPath(url: unknown, prefixes: string[]): string | null {
+        if (typeof url !== 'string' || !url.trim()) return null;
+        let value = url.trim();
+        if (value.startsWith(`${this.publicUrl}/`)) {
+            value = `${UPLOADS_URL_PATH}/${value.slice(this.publicUrl.length + 1)}`;
+        }
+        if (!value.startsWith('/')) return null;
+        const key = uploadKey(value);
+        if (!key) return null;
+        if (!prefixes.some((prefix) => key.startsWith(`${prefix}/`))) {
+            return null;
+        }
+        return `${UPLOADS_URL_PATH}/${key}`;
+    }
+    async uploadSize(url: string): Promise<number | null> {
+        const key = uploadKey(url);
+        if (!key) return null;
+        return this.disk.size(key);
     }
 
     async remove(url?: string | null): Promise<boolean> {

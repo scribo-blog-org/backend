@@ -54,7 +54,7 @@ Every JSON response is wrapped in `{ status, message, data }`. Validation and do
 
 **Accounts.** Registration and sign-in by e-mail or through Google, e-mail confirmation codes, password reset, session list, refresh and sign-out. The Google flow accepts a Google access token and calls userinfo itself; the client id lives in the frontend.
 
-**Content.** Profiles, follows, saved posts. Posts with categories, hashtags, a cover image and a view counter that increments when an article is opened. Nested comments. Search over posts and comments with hashtag suggestions. Link previews. Support tickets.
+**Content.** Profiles, follows, saved posts. Posts with hashtags, a cover image and a view counter that increments when an article is opened. Nested comments. Search over posts and comments with hashtag suggestions. Link previews. Support tickets.
 
 **Conversations.** Both direct conversations and group chats are stored here. A group has a title, a description, a photo, a member list and per-member roles (`admin` or `member`). Group endpoints cover creation, editing, adding and removing members, promoting and demoting admins, leaving, and a public invite that lets a signed-in non-member look at the group and join it:
 
@@ -65,7 +65,7 @@ POST   /api/chat/conversations/:id/join      join an existing group
 
 Messages, read receipts, edits and deletions are written to Mongo and then published to Redis; the socket service only delivers them. Typing indicators never reach this service at all — they are socket-to-socket through Redis, because they are not state worth persisting.
 
-**Administration.** Users and roles, categories, an action journal, an analytics summary and the backup console. Roles are `user`, `author`, `moderator`, `admin` and `tech_admin`.
+**Administration.** Users and roles, an action journal, an analytics summary and the backup console. Roles are `user`, `author`, `moderator`, `admin` and `tech_admin`.
 
 Routes require an access JWT by default. Public ones are marked `@Public()`. `@OptionalAuth()` serves a page to a guest but still attaches the user when a token is present; that is how article pages work. Sensitive routes are rate limited. The view counter is an exception: exceeding its limit does not return 429, the view simply is not counted.
 
@@ -131,8 +131,9 @@ Listens on `http://localhost:3001`.
 
 File handling is isolated in `src/files`, the same way the database is isolated in `src/database`. Application services only call `FilesService.saveImage(...)` and `FilesService.remove(url)`; where the bytes actually live is known to that layer alone (`FilesDisk` writes to disk, `files.config.ts` computes paths and public URLs).
 
-Images are stored under `UPLOADS_DIR/src/<kind>/<id>.<ext>`, where the kind is `avatar`, `featured_image` or `group`. Files are mode 644, directories 755, and intermediate directories are created on first write — adding a new kind requires no manual setup on the server. The database stores the path `/uploads/src/...` without a domain; the client prefixes the origin of its own environment.
+Images are stored under `UPLOADS_DIR/src/<kind>/<id>.<ext>`, where the kind is `avatar`, `post_media` or `group` (`featured_image` is a legacy kind that is still read). Files are mode 644, directories 755, and intermediate directories are created on first write — adding a new kind requires no manual setup on the server. The database stores the path `/uploads/src/...` without a domain; the client prefixes the origin of its own environment.
 
+Post media goes through `POST /api/posts/media` (multipart field `file`, `create_post` permission, 20 uploads per minute per user): images (jpeg, png, webp, avif), gif and video (mp4, webm, mov), up to 100 MB per file, streamed straight to `UPLOADS_DIR/src/post_media/` and checked against the file signature. The response is `{ type, url, mime, size }` with `url` relative (`/uploads/src/post_media/...`). Posts then reference the files through `media`, a JSON array (at most 10 items, at most 100 MB of uploaded files in total per post) sent to `POST /api/posts` and `PATCH /api/posts/:id`; items can also be links (`{ type: 'embed', url }`), which the server resolves into a YouTube/Vimeo/Dailymotion player, a direct image/video link, or a link card. Posts have no title: every post object carries `excerpt` (about 80 characters of the stripped text) and `media`. `scripts/merge-post-titles.mongosh.js` folds legacy titles and `featured_image` into the new shape (dry run by default, `APPLY = true` to apply). When the edge nginx limits the request body, `client_max_body_size` for `/api/posts/media` must be at least 100m.
 In production the directory is served by the nginx container of the `edge` stack, straight from the bind mount and read-only, so Node never streams an image. In development, with no nginx in front, the backend serves it itself (`SERVE_UPLOADS`, on by default outside `NODE_ENV=production`). Legacy S3 URLs still in the database keep working, but such files are not deleted when a post or avatar changes. `backend/uploads` is not tracked in git.
 
 ## Chat encryption
@@ -271,7 +272,6 @@ src/
     auth/              registration, sign-in, sessions, reset
     users/             users and roles
     profile/
-    categories/
     posts/             posts and comments
     search/
     support/
