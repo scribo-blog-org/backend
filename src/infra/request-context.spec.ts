@@ -80,10 +80,10 @@ describe('trace id', () => {
         ).toBe('abc123def456');
     });
 
-    it('drops a missing or malformed one', () => {
-        expect(requestMeta(req({})).trace_id).toBeNull();
-        expect(
-            requestMeta(req({ 'x-trace-id': 'a b\nc' })).trace_id,
-        ).toBeNull();
+    it('falls back to the request id when it is missing or malformed', () => {
+        const missing = requestMeta(req({ 'x-request-id': 'req-abc123' }));
+        expect(missing.trace_id).toBe('req-abc123');
+        const bad = requestMeta(req({ 'x-trace-id': 'a b\nc' }));
+        expect(bad.trace_id).toBe(bad.id);
     });
 });

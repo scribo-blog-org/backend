@@ -80,11 +80,12 @@ export function requestMeta(req: Request): RequestMeta {
     const agent = req.headers?.['user-agent'];
     const incoming = req.headers?.['x-request-id'];
     const trace = req.headers?.['x-trace-id'];
+    const id =
+        typeof incoming === 'string' && REQUEST_ID_PATTERN.test(incoming)
+            ? incoming
+            : randomBytes(6).toString('hex');
     return {
-        id:
-            typeof incoming === 'string' && REQUEST_ID_PATTERN.test(incoming)
-                ? incoming
-                : randomBytes(6).toString('hex'),
+        id,
         method: req.method,
         path: (req.originalUrl || req.url || '').split('?')[0],
         ip: req.ip ?? null,
@@ -93,7 +94,7 @@ export function requestMeta(req: Request): RequestMeta {
         trace_id:
             typeof trace === 'string' && REQUEST_ID_PATTERN.test(trace)
                 ? trace
-                : null,
+                : id,
     };
 }
 
