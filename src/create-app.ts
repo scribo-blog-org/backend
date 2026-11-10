@@ -83,6 +83,7 @@ export async function configureScriboApp(
         set: (key: string, value: unknown) => void;
     };
     http.set('trust proxy', 1);
+    http.set('etag', false);
 
     const configuredOrigins = [process.env.FRONTEND_ORIGIN].filter(
         Boolean,

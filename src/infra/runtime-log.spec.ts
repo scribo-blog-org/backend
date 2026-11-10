@@ -48,7 +48,12 @@ describe('RuntimeLog', () => {
 
     it('writes JSON lines and respects the level', async () => {
         const dir = tmp();
-        const log = new RuntimeLog({ service: 'backend', dir, level: 'warn' });
+        const log = new RuntimeLog({
+            service: 'backend',
+            version: '1.2.3',
+            dir,
+            level: 'warn',
+        });
         log.info('skipped');
         log.error('kept', { code: 7 });
         await wait(50);
@@ -60,6 +65,7 @@ describe('RuntimeLog', () => {
         expect(JSON.parse(lines[0])).toMatchObject({
             level: 'error',
             service: 'backend',
+            version: '1.2.3',
             msg: 'kept',
             code: 7,
         });
