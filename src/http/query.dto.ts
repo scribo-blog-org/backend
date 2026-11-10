@@ -203,9 +203,10 @@ export class ListLogsQueryDto extends PaginationQueryDto {
     @IsString()
     role?: string;
 
-    @ApiPropertyOptional()
+    @ApiPropertyOptional({ description: 'Comma separated event types' })
     @IsOptional()
     @IsString()
+    @MaxLength(1000)
     type?: string;
 
     @ApiPropertyOptional({
