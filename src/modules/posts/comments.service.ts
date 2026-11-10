@@ -15,6 +15,7 @@ import { PostComment } from '../../database/schemas/post-comment.schema';
 import { UsersService } from '../users/users.service';
 import { LoggerService } from '../../infra/logger.service';
 import { textPreview } from '../../infra/log-helpers';
+import { postExcerpt } from './post-html';
 
 function postIdMatch(id: Types.ObjectId | string) {
     const objectId =
@@ -214,7 +215,7 @@ export class CommentsService {
                 actor,
                 {
                     post: postId,
-                    post_title: post.title,
+                    post_title: postExcerpt(post.content_text),
                     comment: String(result._id),
                     comment_text: textPreview(commentText),
                     parent_comment: parentCommentId,
@@ -257,7 +258,7 @@ export class CommentsService {
             actor,
             {
                 post: postId,
-                post_title: post.title,
+                post_title: postExcerpt(post.content_text),
                 comment: String(result._id),
                 comment_text: textPreview(commentText),
             },
@@ -405,13 +406,6 @@ export class CommentsService {
                 { returnDocument: 'after', runValidators: true },
             )
             .lean();
-        await this.logger.action('like_comment', actor, {
-            post: String(comment.post_id),
-            post_title: await this.postTitle(comment.post_id),
-            comment: commentId,
-            comment_text: textPreview(comment.comment_text),
-            comment_author: String(comment.author),
-        });
         return liked;
     }
 
@@ -432,21 +426,14 @@ export class CommentsService {
                 { returnDocument: 'after', runValidators: true },
             )
             .lean();
-        await this.logger.action('unlike_comment', actor, {
-            post: String(comment.post_id),
-            post_title: await this.postTitle(comment.post_id),
-            comment: commentId,
-            comment_text: textPreview(comment.comment_text),
-            comment_author: String(comment.author),
-        });
         return unliked;
     }
 
     private async postTitle(postId: unknown): Promise<string | null> {
         const post = await this.posts
             .findById(postId)
-            .select('title')
-            .lean<{ title?: string }>();
-        return post?.title ?? null;
+            .select('content_text')
+            .lean<{ content_text?: string }>();
+        return post ? postExcerpt(post.content_text) || null : null;
     }
 }

@@ -8,7 +8,7 @@ import {
     Post,
     Query,
     Req,
-    UploadedFile,
+    UploadedFiles,
     UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
@@ -22,7 +22,11 @@ import { RateLimits } from '../../http/rate-limit.guard';
 import { clientIp } from '../../visitor/geo';
 import { ParseMongoIdPipe } from '../../http/mongo-id';
 import { ListPostsQueryDto } from '../../http/query.dto';
-import { imageFileInterceptor } from '../../files/upload';
+import {
+    PostUploadsCleanupInterceptor,
+    PostUploadsGuardInterceptor,
+} from '../../files/post-uploads.interceptor';
+import { postMediaFilesInterceptor } from '../../files/upload';
 import { CommentsService } from './comments.service';
 import { CreateCommentDto, CreatePostDto, EditPostDto } from './dto/posts.dto';
 import { PostsService } from './posts.service';
@@ -51,17 +55,23 @@ export class PostsController {
         by: 'user',
     })
     @Post()
-    @ApiConsumes('multipart/form-data')
-    @UseInterceptors(imageFileInterceptor('featuredImage'))
+    @ApiConsumes('application/json', 'multipart/form-data')
+    @UseInterceptors(
+        PostUploadsGuardInterceptor,
+        postMediaFilesInterceptor(),
+        PostUploadsCleanupInterceptor,
+    )
     async create(
+        @Req() req: Request,
         @Body() dto: CreatePostDto,
-        @UploadedFile() featuredImage: Express.Multer.File | undefined,
+        @UploadedFiles() files: Express.Multer.File[] | undefined,
         @CurrentUser() actor: Actor,
     ) {
-        const data = await this.posts.create(dto, featuredImage, actor);
+        (req as Request & { postUploadsOwned?: boolean }).postUploadsOwned =
+            true;
+        const data = await this.posts.create(dto, files ?? [], actor);
         return { status: true, message: 'Post created successfully!', data };
     }
-
     @Public()
     @Get(':id/comments')
     async listComments(
@@ -151,15 +161,22 @@ export class PostsController {
 
     @ApiBearerAuth()
     @Patch(':id')
-    @ApiConsumes('multipart/form-data')
-    @UseInterceptors(imageFileInterceptor('featuredImage'))
+    @ApiConsumes('application/json', 'multipart/form-data')
+    @UseInterceptors(
+        PostUploadsGuardInterceptor,
+        postMediaFilesInterceptor(),
+        PostUploadsCleanupInterceptor,
+    )
     async edit(
+        @Req() req: Request,
         @Param('id', ParseMongoIdPipe) id: string,
         @Body() dto: EditPostDto,
-        @UploadedFile() featuredImage: Express.Multer.File | undefined,
+        @UploadedFiles() files: Express.Multer.File[] | undefined,
         @CurrentUser() actor: Actor,
     ) {
-        const data = await this.posts.edit(id, dto, featuredImage, actor);
+        (req as Request & { postUploadsOwned?: boolean }).postUploadsOwned =
+            true;
+        const data = await this.posts.edit(id, dto, files ?? [], actor);
         return { status: true, message: 'Post updated successfully', data };
     }
 

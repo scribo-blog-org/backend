@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
+import type { MediaItem } from '../../modules/posts/media';
 import { FIELD_LIMITS } from '../../validation/field-limits';
 
 @Schema({ collection: 'posts' })
@@ -7,25 +8,14 @@ export class Post {
     @Prop({ type: Types.ObjectId, ref: 'User', required: true })
     author!: Types.ObjectId;
 
-    @Prop({
-        required: true,
-        minlength: FIELD_LIMITS.postTitle.min,
-        maxlength: FIELD_LIMITS.postTitle.max,
-    })
-    title!: string;
-
     @Prop()
     featured_image?: string;
 
-    @Prop({
-        required: true,
-        minlength: FIELD_LIMITS.postContent.min,
-        maxlength: FIELD_LIMITS.postContent.max,
-    })
-    content_text!: string;
+    @Prop({ type: [Object], default: [] })
+    media!: MediaItem[];
 
-    @Prop({ type: Types.ObjectId, ref: 'Category', required: true })
-    category!: Types.ObjectId;
+    @Prop({ default: '', maxlength: FIELD_LIMITS.postContent.max })
+    content_text!: string;
 
     @Prop({ required: true, default: Date.now })
     created_date!: Date;

@@ -25,7 +25,7 @@ export class SearchController {
     @Get()
     @RateLimits({ name: 'search', windowMs: 60_000, max: 40 })
     @ApiOperation({
-        summary: 'Search posts, users, and categories',
+        summary: 'Search posts and users',
     })
     async query(@Query() dto: SearchQueryDto, @Req() req: Request) {
         const data = await this.search.search(dto.q, { ip: clientIp(req) });

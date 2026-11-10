@@ -16,7 +16,6 @@ import { PERMISSIONS } from '../../authz/permissions';
 import { hasPermission, type Actor } from '../../authz/policy';
 import { clientIp, lookupVisitorGeo } from '../../visitor/geo';
 import { AppLog } from '../../database/schemas/log.schema';
-import { Category } from '../../database/schemas/category.schema';
 import { Post } from '../../database/schemas/post.schema';
 import { PostComment } from '../../database/schemas/post-comment.schema';
 import { User } from '../../database/schemas/user.schema';
@@ -30,6 +29,7 @@ import {
 import { buildInfo } from '../../infra/build-info';
 import { appVersion } from '../backups/manifest';
 import { RequestMetricsService } from './request-metrics.service';
+import { postExcerpt } from '../posts/post-html';
 
 const DEDUPE_SECONDS = 8;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -73,8 +73,6 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
         @InjectModel(Post.name) private readonly posts: Model<Post>,
         @InjectModel(PostComment.name)
         private readonly comments: Model<PostComment>,
-        @InjectModel(Category.name)
-        private readonly categories: Model<Category>,
         @InjectModel(AppLog.name) private readonly logs: Model<AppLog>,
         @InjectModel(Session.name) private readonly sessions: Model<Session>,
         @InjectModel(VisitPlace.name)
@@ -495,44 +493,6 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
         return { registered, logins, posts, comments, likes };
     }
 
-    private async postsByCategory(
-        match: Record<string, unknown> = {},
-        limit = 8,
-    ) {
-        const rows = await this.posts.aggregate<{
-            _id: string;
-            count: number;
-        }>([
-            { $match: match },
-            { $group: { _id: { $toString: '$category' }, count: { $sum: 1 } } },
-            { $sort: { count: -1 } },
-            { $limit: limit },
-        ]);
-        const categories = await this.categories
-            .find({
-                _id: {
-                    $in: rows
-                        .map((row) => row._id)
-                        .filter((id) => Types.ObjectId.isValid(id)),
-                },
-            })
-            .select('name color')
-            .lean();
-        const byId = new Map(
-            categories.map((category) => [String(category._id), category]),
-        );
-
-        return rows.map((row) => {
-            const category = byId.get(String(row._id));
-            return {
-                _id: row._id,
-                name: category?.name ?? 'Deleted category',
-                color: category?.color ?? null,
-                count: row.count,
-            };
-        });
-    }
-
     private async uniqueSignedIn(first: string, last: string) {
         const rows = await this.visitUsers.aggregate<{ n: number }>([
             { $match: { hour: { $gte: first, $lte: last } } },
@@ -609,21 +569,18 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
             traffic,
             now,
             before,
-            categoriesNow,
             places,
             uniqueUsers,
             timings,
             totals,
             topPosts,
             contentTags,
-            categoriesAll,
         ] = await Promise.all([
             period.granularity === 'hour'
                 ? this.trafficByHour()
                 : this.trafficByDay(period),
             this.activityBetween(period.from, period.to),
             this.activityBetween(period.prevFrom, period.prevTo),
-            this.postsByCategory(inPeriod),
             this.placeActivity(window.first, window.last),
             this.uniqueSignedIn(window.first, window.last),
             this.requestMetrics.summary(
@@ -635,17 +592,15 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
                 this.users.countDocuments(),
                 this.posts.countDocuments(),
                 this.comments.countDocuments(),
-                this.categories.countDocuments(),
                 this.likesTotal(),
             ]),
             this.posts
                 .find({ views_count: { $gt: 0 } })
-                .select('_id title views_count')
+                .select('_id content_text views_count')
                 .sort({ views_count: -1 })
                 .limit(5)
                 .lean(),
             this.contentHashtags(5),
-            this.postsByCategory(),
         ]);
 
         const totalVisits = traffic.signed_in + traffic.anonymous;
@@ -683,7 +638,6 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
                 comments_prev: before.comments,
                 likes: now.likes,
                 likes_prev: before.likes,
-                by_category: categoriesNow,
             },
             places,
             performance: {
@@ -704,17 +658,17 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
                 users: totals[0],
                 posts: totals[1],
                 comments: totals[2],
-                categories: totals[3],
-                likes: totals[4],
+                likes: totals[3],
                 top_posts: (
                     topPosts as Array<{
                         _id: unknown;
-                        title: string;
+                        content_text?: string;
                         views_count?: number;
                     }>
                 ).map((post) => ({
                     _id: post._id,
-                    title: post.title,
+                    title: postExcerpt(post.content_text),
+                    excerpt: postExcerpt(post.content_text),
                     views_count: Number(post.views_count || 0),
                 })),
                 top_hashtags: contentTags.top as Array<{
@@ -723,7 +677,6 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
                     posts: number;
                     comments: number;
                 }>,
-                by_category: categoriesAll,
             },
         };
     }
@@ -754,12 +707,9 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
         const [postDocs, commentDocs] = await Promise.all([
             this.posts
                 .find({
-                    $or: [
-                        { title: { $regex: '#' } },
-                        { content_text: { $regex: '#' } },
-                    ],
+                    content_text: { $regex: '#' },
                 })
-                .select('title content_text')
+                .select('content_text')
                 .lean(),
             this.comments
                 .find({ comment_text: { $regex: '#' } })
@@ -773,11 +723,7 @@ export class AnalyticsService implements OnModuleInit, OnModuleDestroy {
 
         for (const post of postDocs) {
             const tags = [
-                ...new Set(
-                    this.extractHashtags(
-                        `${post.title} ${post.content_text || ''}`,
-                    ),
-                ),
+                ...new Set(this.extractHashtags(`${post.content_text || ''}`)),
             ];
             if (!tags.length) {
                 continue;

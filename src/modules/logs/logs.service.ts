@@ -6,7 +6,6 @@ import { hasPermission, type Actor } from '../../authz/policy';
 import { paginationMeta, parsePagination } from '../../http/pagination';
 import type { ListLogsQueryDto } from '../../http/query.dto';
 import { AppLog } from '../../database/schemas/log.schema';
-import { Category } from '../../database/schemas/category.schema';
 import { Conversation } from '../../database/schemas/conversation.schema';
 import { Post } from '../../database/schemas/post.schema';
 import { User } from '../../database/schemas/user.schema';
@@ -31,6 +30,15 @@ export function levelFilter(level: 'info' | 'warn' | 'error' | 'problems') {
     if (level === 'warn') return { level: 'warn' };
     if (level === 'problems') return problems;
     return { $nor: [problems] };
+}
+
+type LevelName = 'info' | 'warn' | 'error' | 'problems';
+
+export function levelsFilter(levels: string) {
+    const list = [...new Set(levels.split(','))] as LevelName[];
+    return list.length === 1
+        ? levelFilter(list[0])
+        : { $or: list.map((level) => levelFilter(level)) };
 }
 
 const SEARCH_FIELDS = [
@@ -69,8 +77,6 @@ export class LogsQueryService {
         @InjectModel(AppLog.name) private readonly logs: Model<AppLog>,
         @InjectModel(User.name) private readonly users: Model<User>,
         @InjectModel(Post.name) private readonly posts: Model<Post>,
-        @InjectModel(Category.name)
-        private readonly categories: Model<Category>,
         @InjectModel(Conversation.name)
         private readonly conversations: Model<Conversation>,
     ) {}
@@ -99,11 +105,6 @@ export class LogsQueryService {
         }
         if (query.post)
             Object.assign(filter, this.idMatch('data.post', query.post));
-        if (query.category)
-            Object.assign(
-                filter,
-                this.idMatch('data.category', query.category),
-            );
         if (query.conversation) {
             const matches = ['data.conversation', 'data.conversations'].map(
                 (path) => this.idMatch(path, query.conversation!),
@@ -125,7 +126,10 @@ export class LogsQueryService {
             const and = (filter.$and as unknown[] | undefined) ?? [];
             filter.$and = [...and, searchFilter(query.search)];
         }
-        if (query.type) filter.type = query.type;
+        if (query.type) {
+            const types = query.type.split(',').filter(Boolean);
+            filter.type = types.length === 1 ? types[0] : { $in: types };
+        }
         if (query.request) filter['data.request.id'] = query.request;
         if (query.from || query.to) {
             filter.date_time = {
@@ -134,7 +138,7 @@ export class LogsQueryService {
             };
         }
         if (query.level) {
-            const withLevel = levelFilter(query.level);
+            const withLevel = levelsFilter(query.level);
             const { $and = [], ...rest } = filter as {
                 $and?: unknown[];
             };
@@ -176,7 +180,6 @@ export class LogsQueryService {
                 collections: {
                     users: this.users.collection.name,
                     posts: this.posts.collection.name,
-                    categories: this.categories.collection.name,
                     conversations: this.conversations.collection.name,
                 },
                 skip,

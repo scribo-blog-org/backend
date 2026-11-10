@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { AppLog } from '../database/schemas/log.schema';
+import { rlog } from './rlog';
 import {
     currentRequest,
     requestTiming,
@@ -77,8 +78,19 @@ export class LoggerService {
         ) {
             return;
         }
+        const request = currentRequest();
+        if (
+            (input.level === 'warn' || input.level === 'error') &&
+            input.type !== 'server_error'
+        ) {
+            rlog.write(input.level, `${input.type}: ${input.message}`, {
+                type: input.type,
+                request_id: request?.id ?? null,
+                ...(request?.trace_id ? { trace_id: request.trace_id } : {}),
+                ...(input.data ?? {}),
+            });
+        }
         try {
-            const request = currentRequest();
             await this.logs.create({
                 type: input.type,
                 message: input.message,
@@ -89,7 +101,7 @@ export class LoggerService {
                 },
             });
         } catch (error) {
-            console.error(error);
+            rlog.error('mongo log write failed', { type: input.type, error });
         }
     }
 

@@ -4,7 +4,6 @@ import { LogsQueryService } from './logs.service';
 const collections = {
     users: 'users',
     posts: 'posts',
-    categories: 'categories',
     conversations: 'conversations',
 };
 
@@ -31,7 +30,6 @@ describe('entitiesPipeline', () => {
             'user:$data.target_nick',
             'user:$data.target_nick',
             'post:$data.post_title',
-            'category:$data.category_snapshot.name',
             'conversation:$data.title',
         ]);
     });
@@ -67,7 +65,7 @@ describe('entitiesPipeline', () => {
             limit: 20,
         });
         const from = stage(pipeline, '$lookup').map((s: any) => s.$lookup.from);
-        expect(from).toEqual(['users', 'posts', 'categories', 'conversations']);
+        expect(from).toEqual(['users', 'posts', 'conversations']);
         const facet = stage(pipeline, '$facet')[0] as any;
         expect(facet.$facet.items.slice(0, 2)).toEqual([
             { $skip: 40 },
@@ -125,7 +123,6 @@ describe('LogsQueryService.entities', () => {
             model('logs', aggregate),
             model('users'),
             model('posts'),
-            model('categories'),
             model('conversations'),
         );
 
@@ -155,7 +152,6 @@ describe('LogsQueryService.entities', () => {
             model('logs', jest.fn()),
             model('users'),
             model('posts'),
-            model('categories'),
             model('conversations'),
         );
         await expect(

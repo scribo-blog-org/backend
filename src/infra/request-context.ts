@@ -8,6 +8,7 @@ export type RequestMeta = {
     path: string;
     ip: string | null;
     user_agent: string | null;
+    trace_id: string | null;
 };
 
 export type DbTimer = {
@@ -26,6 +27,9 @@ export type RequestSample = {
     method: string;
     path: string;
     request_id: string | null;
+    trace_id?: string | null;
+    error?: string | null;
+    query?: Record<string, string> | null;
 };
 
 const storage = new AsyncLocalStorage<RequestMeta>();
@@ -75,16 +79,22 @@ export function requestTiming() {
 export function requestMeta(req: Request): RequestMeta {
     const agent = req.headers?.['user-agent'];
     const incoming = req.headers?.['x-request-id'];
+    const trace = req.headers?.['x-trace-id'];
+    const id =
+        typeof incoming === 'string' && REQUEST_ID_PATTERN.test(incoming)
+            ? incoming
+            : randomBytes(6).toString('hex');
     return {
-        id:
-            typeof incoming === 'string' && REQUEST_ID_PATTERN.test(incoming)
-                ? incoming
-                : randomBytes(6).toString('hex'),
+        id,
         method: req.method,
         path: (req.originalUrl || req.url || '').split('?')[0],
         ip: req.ip ?? null,
         user_agent:
             typeof agent === 'string' ? agent.slice(0, USER_AGENT_LIMIT) : null,
+        trace_id:
+            typeof trace === 'string' && REQUEST_ID_PATTERN.test(trace)
+                ? trace
+                : id,
     };
 }
 
@@ -96,6 +106,25 @@ export function requestContextMiddleware(
     const meta = requestMeta(req);
     res.setHeader('X-Request-Id', meta.id);
     storage.run(meta, next);
+}
+
+const SENSITIVE_QUERY =
+    /pass|secret|token|auth|cookie|key|signature|code|email/i;
+
+export function queryOfUrl(url: string): Record<string, string> | null {
+    const index = url.indexOf('?');
+    if (index < 0) return null;
+    const out: Record<string, string> = {};
+    let count = 0;
+    for (const [key, value] of new URLSearchParams(url.slice(index + 1))) {
+        if (count++ >= 20) break;
+        const name = key.slice(0, 60);
+        const safe = SENSITIVE_QUERY.test(key)
+            ? '[redacted]'
+            : value.slice(0, 120);
+        out[name] = name in out ? `${out[name]},${safe}` : safe;
+    }
+    return Object.keys(out).length ? out : null;
 }
 
 export function requestTimingMiddleware(
@@ -129,6 +158,12 @@ export function requestTimingMiddleware(
                 method: req.method,
                 path: meta?.path ?? (req.originalUrl || '').split('?')[0],
                 request_id: meta?.id ?? null,
+                trace_id: meta?.trace_id ?? null,
+                query: queryOfUrl(req.originalUrl || ''),
+                error:
+                    typeof res.locals?.error_message === 'string'
+                        ? res.locals.error_message
+                        : null,
             });
         });
         dbStorage.run(timer, next);

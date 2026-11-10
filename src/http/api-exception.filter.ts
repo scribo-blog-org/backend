@@ -8,9 +8,11 @@ import {
 import type { Request, Response } from 'express';
 import { Error as MongooseError } from 'mongoose';
 import type { LoggerService } from '../infra/logger.service';
+import { rlog } from '../infra/rlog';
 import { currentRequest } from '../infra/request-context';
 import { RateLimitedException } from './rate-limit.guard';
 import { MulterError } from 'multer';
+import { postMediaFileSizeError } from '../files/upload';
 import {
     bagFromField,
     FieldBagException,
@@ -46,7 +48,9 @@ export class ApiExceptionFilter implements ExceptionFilter {
             const field = exception.field || 'file';
             const message =
                 exception.code === 'LIMIT_FILE_SIZE'
-                    ? 'Max size of image should be 5 MB!'
+                    ? field === 'file'
+                        ? postMediaFileSizeError()
+                        : 'Max size of image should be 5 MB!'
                     : exception.message;
             response.status(HttpStatus.BAD_REQUEST).json({
                 status: false,
@@ -74,21 +78,37 @@ export class ApiExceptionFilter implements ExceptionFilter {
             message = exception.message;
         }
 
-        if (!isHttp) {
-            console.error(exception);
+        const requestPath = (request.originalUrl || request.url || '').split(
+            '?',
+        )[0];
+        const auth = (request as { auth?: { id?: string } }).auth;
+        response.locals.error_message = message;
+        if (status >= 500) {
+            rlog.error(
+                `${status} ${request.method} ${requestPath}: ${message}`,
+                {
+                    status,
+                    method: request.method,
+                    path: requestPath,
+                    request_id: currentRequest()?.id ?? null,
+                    ...(currentRequest()?.trace_id
+                        ? { trace_id: currentRequest()?.trace_id }
+                        : {}),
+                    ...(auth?.id ? { user: auth.id } : {}),
+                    error: exception,
+                },
+            );
         }
         if (status >= 500 && status !== HttpStatus.SERVICE_UNAVAILABLE) {
-            const auth = (request as { auth?: { id?: string } }).auth;
             void this.logger?.error({
                 status,
                 method: request.method,
-                path: (request.originalUrl || request.url || '').split('?')[0],
+                path: requestPath,
                 message,
                 stack: exception instanceof Error ? exception.stack : undefined,
                 user: auth?.id ?? null,
             });
         }
-
         this.logRefusal(exception, status, request);
 
         const payload: Record<string, unknown> = {

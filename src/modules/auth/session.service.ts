@@ -1,3 +1,4 @@
+import { rlog } from '../../infra/rlog';
 import {
     Injectable,
     NotFoundException,
@@ -100,7 +101,9 @@ export class SessionService implements OnModuleInit {
                 }),
             })
             .catch((error) => {
-                console.error('Failed to send login alert email', error);
+                rlog.error('Failed to send login alert email', {
+                    error: error,
+                });
             });
     }
 

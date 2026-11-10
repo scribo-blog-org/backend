@@ -21,9 +21,6 @@ export class SearchQueryLog {
     @Prop({ required: true, default: 0 })
     users!: number;
 
-    @Prop({ required: true, default: 0 })
-    categories!: number;
-
     @Prop({ default: '' })
     ip?: string;
 }

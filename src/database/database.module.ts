@@ -9,7 +9,6 @@ import {
     EmailVerificationCode,
     EmailVerificationCodeSchema,
 } from './schemas/email-verification.schema';
-import { Category, CategorySchema } from './schemas/category.schema';
 import { Post, PostSchema } from './schemas/post.schema';
 import { PostComment, PostCommentSchema } from './schemas/post-comment.schema';
 import {
@@ -80,7 +79,6 @@ import {
                 name: EmailVerificationCode.name,
                 schema: EmailVerificationCodeSchema,
             },
-            { name: Category.name, schema: CategorySchema },
             { name: Post.name, schema: PostSchema },
             { name: PostComment.name, schema: PostCommentSchema },
             { name: SupportRequest.name, schema: SupportRequestSchema },

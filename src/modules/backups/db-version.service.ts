@@ -1,3 +1,4 @@
+import { rlog } from '../../infra/rlog';
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
@@ -57,7 +58,7 @@ export class DbVersionService implements OnModuleInit {
                 },
             );
         } catch (error) {
-            console.error('database version was not synced', error);
+            rlog.error('database version was not synced', { error: error });
             await this.logger.system(
                 'db_version_failed',
                 'Database version was not synced',
