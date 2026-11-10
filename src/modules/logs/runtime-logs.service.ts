@@ -25,7 +25,8 @@ export type RuntimeEntry = {
 };
 
 export type RuntimeQuery = {
-    source: RuntimeSource;
+    source?: RuntimeSource;
+    sources?: RuntimeSource[];
     level?: string;
     q?: string;
     from?: string;
@@ -96,11 +97,12 @@ function readLines(path: string): string[] {
     return text.split('\n');
 }
 
-export function readRuntimeLogs(
+function readOne(
     root: string,
+    source: RuntimeSource,
     query: RuntimeQuery,
 ): RuntimePage {
-    const config = RUNTIME_SOURCES[query.source];
+    const config = RUNTIME_SOURCES[source];
     const dir = resolve(root, config.dir);
     const files = listLogFiles(dir, config.prefix);
     if (files.length === 0) {
@@ -126,7 +128,7 @@ export function readRuntimeLogs(
         for (let i = lines.length - 1; i >= 0; i -= 1) {
             const line = lines[i];
             if (needle && !line.toLowerCase().includes(needle)) continue;
-            const entry = parseRuntimeLine(line, query.source);
+            const entry = parseRuntimeLine(line, source);
             if (!entry) continue;
             const time = Date.parse(entry.ts);
             if (before !== null && time >= before) continue;
@@ -148,6 +150,34 @@ export function readRuntimeLogs(
     };
 }
 
+export function readRuntimeLogs(
+    root: string,
+    query: RuntimeQuery,
+): RuntimePage {
+    const sources = query.sources?.length
+        ? query.sources
+        : query.source
+          ? [query.source]
+          : (Object.keys(RUNTIME_SOURCES) as RuntimeSource[]);
+    if (sources.length === 1) return readOne(root, sources[0], query);
+
+    const limit = Math.min(
+        Math.max(Math.trunc(query.limit ?? DEFAULT_LIMIT), 1),
+        MAX_LIMIT,
+    );
+    const pages = sources.map((source) => readOne(root, source, query));
+    const merged = pages
+        .flatMap((page) => page.items)
+        .sort((a, b) => Date.parse(b.ts) - Date.parse(a.ts));
+    const items = merged.slice(0, limit);
+    const more =
+        merged.length > limit || pages.some((page) => page.next !== null);
+    return {
+        items,
+        next: more && items.length > 0 ? items[items.length - 1].ts : null,
+        available: pages.some((page) => page.available),
+    };
+}
 @Injectable()
 export class RuntimeLogsService {
     read(query: RuntimeQuery): RuntimePage {

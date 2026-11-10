@@ -86,6 +86,7 @@ export class LoggerService {
             rlog.write(input.level, `${input.type}: ${input.message}`, {
                 type: input.type,
                 request_id: request?.id ?? null,
+                ...(request?.trace_id ? { trace_id: request.trace_id } : {}),
                 ...(input.data ?? {}),
             });
         }

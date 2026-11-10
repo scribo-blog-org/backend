@@ -91,6 +91,9 @@ export class ApiExceptionFilter implements ExceptionFilter {
                     method: request.method,
                     path: requestPath,
                     request_id: currentRequest()?.id ?? null,
+                    ...(currentRequest()?.trace_id
+                        ? { trace_id: currentRequest()?.trace_id }
+                        : {}),
                     ...(auth?.id ? { user: auth.id } : {}),
                     error: exception,
                 },

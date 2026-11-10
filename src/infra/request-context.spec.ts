@@ -64,3 +64,26 @@ describe('queryOfUrl', () => {
         expect(out?.q).toHaveLength(120);
     });
 });
+
+describe('trace id', () => {
+    const req = (headers: Record<string, string>) =>
+        ({
+            headers,
+            method: 'GET',
+            originalUrl: '/api/posts',
+            ip: '1.1.1.1',
+        }) as never;
+
+    it('accepts a well formed X-Trace-Id', () => {
+        expect(
+            requestMeta(req({ 'x-trace-id': 'abc123def456' })).trace_id,
+        ).toBe('abc123def456');
+    });
+
+    it('drops a missing or malformed one', () => {
+        expect(requestMeta(req({})).trace_id).toBeNull();
+        expect(
+            requestMeta(req({ 'x-trace-id': 'a b\nc' })).trace_id,
+        ).toBeNull();
+    });
+});

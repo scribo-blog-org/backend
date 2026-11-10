@@ -54,6 +54,7 @@ function logRequest(sample: RequestSample) {
             db_ms: Math.round(sample.db_ms),
             db_queries: sample.db_queries,
             request_id: sample.request_id,
+            ...(sample.trace_id ? { trace_id: sample.trace_id } : {}),
             ...(sample.user ? { user: sample.user } : {}),
             ...(sample.query ? { query: sample.query } : {}),
             ...(sample.error ? { error_message: sample.error } : {}),
@@ -146,7 +147,12 @@ export async function configureScriboApp(
         },
         credentials: true,
         methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-        allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
+        allowedHeaders: [
+            'Content-Type',
+            'Authorization',
+            'X-Request-Id',
+            'X-Trace-Id',
+        ],
         exposedHeaders: ['Set-Cookie', 'Content-Disposition', 'X-Request-Id'],
         optionsSuccessStatus: 200,
     });

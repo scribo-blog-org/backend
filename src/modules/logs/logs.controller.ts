@@ -10,7 +10,7 @@ import {
     ListRuntimeLogsQueryDto,
 } from '../../http/query.dto';
 import { LogsQueryService } from './logs.service';
-import { RuntimeLogsService } from './runtime-logs.service';
+import { RuntimeLogsService, type RuntimeSource } from './runtime-logs.service';
 
 @ApiTags('logs')
 @Controller('logs')
@@ -32,7 +32,13 @@ export class LogsController {
     @RequirePermissions(PERMISSIONS.VIEW_LOGS)
     @Get('runtime')
     runtime(@Query() query: ListRuntimeLogsQueryDto) {
-        const data = this.runtimeLogs.read(query);
+        const { sources, ...rest } = query;
+        const data = this.runtimeLogs.read({
+            ...rest,
+            sources: sources
+                ? (sources.split(',') as RuntimeSource[])
+                : undefined,
+        });
         return {
             status: true,
             message: 'Runtime logs fetched successfully!',

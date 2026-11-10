@@ -135,10 +135,11 @@ export class AdminListUsersQueryDto extends PaginationQueryDto {
 
 export class ListRuntimeLogsQueryDto {
     @ApiPropertyOptional({
-        enum: ['backend', 'socket', 'frontend'],
+        description: 'Comma separated services: backend, socket, frontend',
     })
-    @IsIn(['backend', 'socket', 'frontend'])
-    source!: 'backend' | 'socket' | 'frontend';
+    @IsOptional()
+    @Matches(/^(backend|socket|frontend)(,(backend|socket|frontend))*$/)
+    sources?: string;
 
     @ApiPropertyOptional({ description: 'Comma separated levels' })
     @IsOptional()

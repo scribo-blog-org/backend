@@ -8,6 +8,7 @@ export type RequestMeta = {
     path: string;
     ip: string | null;
     user_agent: string | null;
+    trace_id: string | null;
 };
 
 export type DbTimer = {
@@ -26,6 +27,7 @@ export type RequestSample = {
     method: string;
     path: string;
     request_id: string | null;
+    trace_id?: string | null;
     error?: string | null;
     query?: Record<string, string> | null;
 };
@@ -77,6 +79,7 @@ export function requestTiming() {
 export function requestMeta(req: Request): RequestMeta {
     const agent = req.headers?.['user-agent'];
     const incoming = req.headers?.['x-request-id'];
+    const trace = req.headers?.['x-trace-id'];
     return {
         id:
             typeof incoming === 'string' && REQUEST_ID_PATTERN.test(incoming)
@@ -87,6 +90,10 @@ export function requestMeta(req: Request): RequestMeta {
         ip: req.ip ?? null,
         user_agent:
             typeof agent === 'string' ? agent.slice(0, USER_AGENT_LIMIT) : null,
+        trace_id:
+            typeof trace === 'string' && REQUEST_ID_PATTERN.test(trace)
+                ? trace
+                : null,
     };
 }
 
@@ -150,6 +157,7 @@ export function requestTimingMiddleware(
                 method: req.method,
                 path: meta?.path ?? (req.originalUrl || '').split('?')[0],
                 request_id: meta?.id ?? null,
+                trace_id: meta?.trace_id ?? null,
                 query: queryOfUrl(req.originalUrl || ''),
                 error:
                     typeof res.locals?.error_message === 'string'
