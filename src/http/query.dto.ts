@@ -222,10 +222,12 @@ export class ListLogsQueryDto extends PaginationQueryDto {
     @MaxLength(64)
     request?: string;
 
-    @ApiPropertyOptional({ enum: ['info', 'warn', 'error', 'problems'] })
+    @ApiPropertyOptional({
+        description: 'Comma separated: info, warn, error, problems',
+    })
     @IsOptional()
-    @IsIn(['info', 'warn', 'error', 'problems'])
-    level?: 'info' | 'warn' | 'error' | 'problems';
+    @Matches(/^(info|warn|error|problems)(,(info|warn|error|problems))*$/)
+    level?: string;
 
     @ApiPropertyOptional({ description: 'Only events at or after this time' })
     @IsOptional()

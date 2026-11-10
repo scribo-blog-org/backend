@@ -32,6 +32,15 @@ export function levelFilter(level: 'info' | 'warn' | 'error' | 'problems') {
     return { $nor: [problems] };
 }
 
+type LevelName = 'info' | 'warn' | 'error' | 'problems';
+
+export function levelsFilter(levels: string) {
+    const list = [...new Set(levels.split(','))] as LevelName[];
+    return list.length === 1
+        ? levelFilter(list[0])
+        : { $or: list.map((level) => levelFilter(level)) };
+}
+
 const SEARCH_FIELDS = [
     'message',
     'type',
@@ -126,7 +135,7 @@ export class LogsQueryService {
             };
         }
         if (query.level) {
-            const withLevel = levelFilter(query.level);
+            const withLevel = levelsFilter(query.level);
             const { $and = [], ...rest } = filter as {
                 $and?: unknown[];
             };
