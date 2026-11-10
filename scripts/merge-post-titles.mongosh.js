@@ -1,18 +1,3 @@
-// Merges legacy post titles into the post body and converts featured_image to media[].
-//
-// Dry run by default. Run with:
-//   mongosh "$MONGODB_URI" --eval "APPLY = true" scripts/merge-post-titles.mongosh.js
-// Idempotent: posts that no longer have `title` / `featured_image` are not touched.
-//
-// For every post that still has `title`:
-//   content_text = '<p><strong>' + escape(title) + '</strong></p>' + content_text
-//   (plain-text content without tags is wrapped in <p>; empty titles are only unset)
-//   $unset title
-// For every post with a representable featured_image (a stored '/uploads/...' path):
-//   media = [{ id, type: 'image'|'gif', url: featured_image }]  (only if media is empty)
-//   $unset featured_image
-// Other featured_image values are left alone and counted as skipped.
-
 const apply = typeof APPLY !== 'undefined' && APPLY === true;
 
 const escapeHtml = (value) =>

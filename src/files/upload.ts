@@ -9,11 +9,6 @@ import { uploadsDir } from './files.config';
 export const UPLOAD_LIMIT_SIZE = 5 * 1024 * 1024;
 const DEFAULT_POST_MEDIA_MAX_MB = 100;
 
-/**
- * Per-post (and per-file) media limit in MB, `POST_MEDIA_MAX_MB`.
- * Read from process.env on every call: multer options are built at import
- * time, before ConfigModule has loaded .env.
- */
 export function postMediaMaxMb(): number {
     const value = Number(process.env.POST_MEDIA_MAX_MB);
     return Number.isFinite(value) && value > 0
@@ -127,7 +122,6 @@ export function postMediaFilesInterceptor() {
     );
     return AnyFilesInterceptor({
         limits: {
-            // Getter: busboy reads limits.fileSize for every request.
             get fileSize() {
                 return postMediaLimitSize();
             },

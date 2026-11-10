@@ -1,15 +1,3 @@
-// Converts references stored as 24-hex strings into ObjectIds.
-//
-// The schemas used to declare these fields with `Types.ObjectId`, which Mongoose
-// reads as Mixed, so whatever the code passed was stored as is (usually a string).
-// Queries cast to ObjectId after the schema fix, so string values stop matching.
-//
-// Run it right after deploying the schema fix. It is idempotent and a dry run by
-// default: it only counts. Take a backup first.
-//
-//   dry run: mongosh <uri> --file scripts/objectid-references.mongosh.js
-//   apply:   mongosh <uri> --eval 'var APPLY = true' --file scripts/objectid-references.mongosh.js
-
 const apply = typeof APPLY !== 'undefined' && APPLY === true;
 const HEX = '^[a-fA-F0-9]{24}$';
 
