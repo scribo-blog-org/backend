@@ -1,4 +1,4 @@
-import { requestMeta, unionMs } from './request-context';
+import { queryOfUrl, requestMeta, unionMs } from './request-context';
 import { filterShape } from '../database/db-timing.plugin';
 
 describe('unionMs', () => {
@@ -38,5 +38,52 @@ describe('filterShape', () => {
         expect(
             filterShape({ user: 'u1', age: { $gt: 18 }, tags: { $in: ['a'] } }),
         ).toEqual({ user: '?', age: { $gt: '?' }, tags: { $in: ['?'] } });
+    });
+});
+
+describe('queryOfUrl', () => {
+    it('returns null without a query string', () => {
+        expect(queryOfUrl('/api/posts')).toBeNull();
+    });
+
+    it('keeps plain params and hides sensitive ones', () => {
+        expect(
+            queryOfUrl('/api/support?status=new&limit=1&token=abc&email=a@b.c'),
+        ).toEqual({
+            status: 'new',
+            limit: '1',
+            token: '[redacted]',
+            email: '[redacted]',
+        });
+    });
+
+    it('joins repeated keys and caps long values', () => {
+        const long = 'x'.repeat(300);
+        const out = queryOfUrl(`/api/posts?_id=a&_id=b&q=${long}`);
+        expect(out?._id).toBe('a,b');
+        expect(out?.q).toHaveLength(120);
+    });
+});
+
+describe('trace id', () => {
+    const req = (headers: Record<string, string>) =>
+        ({
+            headers,
+            method: 'GET',
+            originalUrl: '/api/posts',
+            ip: '1.1.1.1',
+        }) as never;
+
+    it('accepts a well formed X-Trace-Id', () => {
+        expect(
+            requestMeta(req({ 'x-trace-id': 'abc123def456' })).trace_id,
+        ).toBe('abc123def456');
+    });
+
+    it('falls back to the request id when it is missing or malformed', () => {
+        const missing = requestMeta(req({ 'x-request-id': 'req-abc123' }));
+        expect(missing.trace_id).toBe('req-abc123');
+        const bad = requestMeta(req({ 'x-trace-id': 'a b\nc' }));
+        expect(bad.trace_id).toBe(bad.id);
     });
 });

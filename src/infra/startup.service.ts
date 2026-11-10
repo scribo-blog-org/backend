@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
 import { FilesService } from '../files/files.service';
+import { rlog } from './rlog';
 
 @Injectable()
 export class StartupService {
@@ -18,13 +19,21 @@ export class StartupService {
         }
 
         await this.connection.db.command({ ping: 1 });
-        console.log(
-            `backend mongo connected host=${this.connection.host} db=${this.connection.name}`,
+        rlog.info('mongo connected', {
+            host: this.connection.host,
+            db: this.connection.name,
+        });
+        this.connection.on('disconnected', () =>
+            rlog.error('mongo disconnected'),
+        );
+        this.connection.on('reconnected', () => rlog.info('mongo reconnected'));
+        this.connection.on('error', (error: Error) =>
+            rlog.error('mongo error', { error }),
         );
     }
 
     async assertFiles() {
         const { dir, publicUrl } = await this.files.assertReady();
-        console.log(`backend files ready dir=${dir} url=${publicUrl}`);
+        rlog.info('files ready', { dir, url: publicUrl });
     }
 }

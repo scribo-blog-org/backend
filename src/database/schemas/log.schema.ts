@@ -36,7 +36,43 @@ export const DIAGNOSTIC_LOG_TYPES = [
     'access_denied',
     'external_failed',
 ];
-const DIAGNOSTIC_TTL_SECONDS = 60 * 24 * 60 * 60;
+const DAY_SECONDS = 24 * 60 * 60;
+const DIAGNOSTIC_TTL_SECONDS = 60 * DAY_SECONDS;
+export const SERVER_ERROR_LOG_TYPES = ['server_error'];
+export const NOISE_LOG_TYPES = [
+    'unlike_post',
+    'save_post',
+    'unsave_post',
+    'like_comment',
+    'unlike_comment',
+    'follow_user',
+    'unfollow_user',
+];
+export const LIKE_LOG_TYPES = ['like_post'];
+AppLogSchema.index(
+    { date_time: 1 },
+    {
+        name: 'server_error_ttl',
+        expireAfterSeconds: 60 * DAY_SECONDS,
+        partialFilterExpression: { type: { $in: SERVER_ERROR_LOG_TYPES } },
+    },
+);
+AppLogSchema.index(
+    { date_time: 1 },
+    {
+        name: 'noise_ttl',
+        expireAfterSeconds: 30 * DAY_SECONDS,
+        partialFilterExpression: { type: { $in: NOISE_LOG_TYPES } },
+    },
+);
+AppLogSchema.index(
+    { date_time: 1 },
+    {
+        name: 'like_ttl',
+        expireAfterSeconds: 90 * DAY_SECONDS,
+        partialFilterExpression: { type: { $in: LIKE_LOG_TYPES } },
+    },
+);
 AppLogSchema.index(
     { date_time: 1 },
     {

@@ -1,3 +1,4 @@
+import { rlog } from '../../infra/rlog';
 import { buildInfo } from '../../infra/build-info';
 import {
     ConflictException,
@@ -337,7 +338,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
             throw error;
         }
         await this.prune().catch((e) =>
-            console.error('backup prune failed', e),
+            rlog.error('backup prune failed', { error: e }),
         );
         return record.toObject();
     }
@@ -362,7 +363,9 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
         const delay = Math.min(msUntilNextRun(this.cfg.at, from), MAX_TIMER_MS);
         this.timer = setTimeout(() => {
             this.start('schedule').catch((error) =>
-                console.error('scheduled backup was not started', error),
+                rlog.error('scheduled backup was not started', {
+                    error: error,
+                }),
             );
             this.scheduleNext(new Date(Date.now() + 60_000));
         }, delay);
@@ -400,7 +403,7 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
                 );
             }
             const removed = await this.prune().catch((e) => {
-                console.error('backup prune failed', e);
+                rlog.error('backup prune failed', { error: e });
                 return 0;
             });
             if (removed > 0) {
@@ -559,7 +562,9 @@ export class BackupsService implements OnModuleInit, OnModuleDestroy {
                         error: message,
                     },
                 )
-                .catch((e) => console.error('backup status not saved', e));
+                .catch((e) =>
+                    rlog.error('backup status not saved', { error: e }),
+                );
             return message;
         } finally {
             await rm(conf, { force: true });

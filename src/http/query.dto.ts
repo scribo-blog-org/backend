@@ -133,6 +133,50 @@ export class AdminListUsersQueryDto extends PaginationQueryDto {
     roles?: string;
 }
 
+export class ListRuntimeLogsQueryDto {
+    @ApiPropertyOptional({
+        description: 'Comma separated services: backend, socket, frontend',
+    })
+    @IsOptional()
+    @Matches(/^(backend|socket|frontend)(,(backend|socket|frontend))*$/)
+    sources?: string;
+
+    @ApiPropertyOptional({ description: 'Comma separated levels' })
+    @IsOptional()
+    @IsString()
+    @MaxLength(40)
+    level?: string;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsString()
+    @MaxLength(200)
+    q?: string;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsISO8601()
+    from?: string;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsISO8601()
+    to?: string;
+
+    @ApiPropertyOptional({ description: 'Cursor: entries older than this' })
+    @IsOptional()
+    @IsISO8601()
+    before?: string;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt()
+    @Min(1)
+    @Max(500)
+    limit?: number;
+}
+
 export class ListLogsQueryDto extends PaginationQueryDto {
     @ApiPropertyOptional()
     @IsOptional()
@@ -159,9 +203,10 @@ export class ListLogsQueryDto extends PaginationQueryDto {
     @IsString()
     role?: string;
 
-    @ApiPropertyOptional()
+    @ApiPropertyOptional({ description: 'Comma separated event types' })
     @IsOptional()
     @IsString()
+    @MaxLength(1000)
     type?: string;
 
     @ApiPropertyOptional({
@@ -178,10 +223,12 @@ export class ListLogsQueryDto extends PaginationQueryDto {
     @MaxLength(64)
     request?: string;
 
-    @ApiPropertyOptional({ enum: ['info', 'warn', 'error', 'problems'] })
+    @ApiPropertyOptional({
+        description: 'Comma separated: info, warn, error, problems',
+    })
     @IsOptional()
-    @IsIn(['info', 'warn', 'error', 'problems'])
-    level?: 'info' | 'warn' | 'error' | 'problems';
+    @Matches(/^(info|warn|error|problems)(,(info|warn|error|problems))*$/)
+    level?: string;
 
     @ApiPropertyOptional({ description: 'Only events at or after this time' })
     @IsOptional()

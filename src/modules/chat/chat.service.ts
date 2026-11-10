@@ -1,3 +1,4 @@
+import { rlog } from '../../infra/rlog';
 import {
     BadRequestException,
     ForbiddenException,
@@ -593,7 +594,9 @@ export class ChatService {
                 }),
             })
             .catch((error) => {
-                console.error('Failed to send chat started email', error);
+                rlog.error('Failed to send chat started email', {
+                    error: error,
+                });
             });
     }
 

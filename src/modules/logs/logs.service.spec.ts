@@ -1,4 +1,9 @@
-import { LogsQueryService, levelFilter, searchFilter } from './logs.service';
+import {
+    LogsQueryService,
+    levelFilter,
+    levelsFilter,
+    searchFilter,
+} from './logs.service';
 
 describe('LogsQueryService user filter', () => {
     const admin = { id: 'a', role: 'admin' } as never;
@@ -110,5 +115,17 @@ describe('search', () => {
                 part.$or?.some((item: any) => 'data.request.id' in item),
             ),
         ).toBe(true);
+    });
+});
+
+describe('levelsFilter', () => {
+    it('keeps a single level as it is', () => {
+        expect(levelsFilter('warn')).toEqual(levelFilter('warn'));
+    });
+
+    it('combines several levels with or', () => {
+        expect(levelsFilter('error,info')).toEqual({
+            $or: [levelFilter('error'), levelFilter('info')],
+        });
     });
 });

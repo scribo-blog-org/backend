@@ -14,7 +14,7 @@ RUN apk add --no-cache mongodb-tools tar
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/dist ./dist
-RUN mkdir -p /app/uploads /app/backups && chown -R node:node /app
+RUN mkdir -p /app/uploads /app/backups /app/logs && chown -R node:node /app
 USER node
 EXPOSE 3001
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=5 \

@@ -32,6 +32,15 @@ export function levelFilter(level: 'info' | 'warn' | 'error' | 'problems') {
     return { $nor: [problems] };
 }
 
+type LevelName = 'info' | 'warn' | 'error' | 'problems';
+
+export function levelsFilter(levels: string) {
+    const list = [...new Set(levels.split(','))] as LevelName[];
+    return list.length === 1
+        ? levelFilter(list[0])
+        : { $or: list.map((level) => levelFilter(level)) };
+}
+
 const SEARCH_FIELDS = [
     'message',
     'type',
@@ -117,7 +126,10 @@ export class LogsQueryService {
             const and = (filter.$and as unknown[] | undefined) ?? [];
             filter.$and = [...and, searchFilter(query.search)];
         }
-        if (query.type) filter.type = query.type;
+        if (query.type) {
+            const types = query.type.split(',').filter(Boolean);
+            filter.type = types.length === 1 ? types[0] : { $in: types };
+        }
         if (query.request) filter['data.request.id'] = query.request;
         if (query.from || query.to) {
             filter.date_time = {
@@ -126,7 +138,7 @@ export class LogsQueryService {
             };
         }
         if (query.level) {
-            const withLevel = levelFilter(query.level);
+            const withLevel = levelsFilter(query.level);
             const { $and = [], ...rest } = filter as {
                 $and?: unknown[];
             };

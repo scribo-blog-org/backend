@@ -521,10 +521,6 @@ export class PostsService {
             throw new ConflictException('Post is already in saved posts!');
         }
         const result = await this.usersService.addSavedPost(actor.id, id);
-        await this.logger.action('save_post', actor, {
-            post: id,
-            post_title: postExcerpt(post.content_text),
-        });
         return { saved_posts: result?.saved_posts };
     }
 
@@ -543,10 +539,6 @@ export class PostsService {
             throw new ConflictException('Post is not in saved posts!');
         }
         const result = await this.usersService.removeSavedPost(actor.id, id);
-        await this.logger.action('unsave_post', actor, {
-            post: id,
-            post_title: postExcerpt(post.content_text),
-        });
         return { saved_posts: result?.saved_posts };
     }
 
@@ -600,11 +592,6 @@ export class PostsService {
                 { returnDocument: 'after' },
             )
             .lean();
-        await this.logger.action('unlike_post', actor, {
-            post: id,
-            post_title: postExcerpt(post.content_text),
-            post_author: String(post.author),
-        });
         return { likes: result?.likes };
     }
 }
