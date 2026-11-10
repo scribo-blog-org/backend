@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import { rlog } from '../infra/rlog';
 
 export const EVENTS_CHANNEL = 'scribo:events';
 
@@ -24,6 +25,8 @@ export class RedisPublisher implements OnModuleDestroy {
         this.client.on('error', (error: Error) => {
             this.logger.error(error.message);
         });
+        this.client.on('ready', () => rlog.info('redis ready'));
+        this.client.on('close', () => rlog.warn('redis connection closed'));
     }
 
     async publish(

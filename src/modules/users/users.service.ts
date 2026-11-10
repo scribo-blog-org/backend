@@ -347,10 +347,6 @@ export class UsersService implements OnModuleInit {
             )
             .lean<UserLean>();
 
-        await this.logger.action('follow_user', actor, {
-            target_user: String(followed._id),
-            target_nick: followed.nick_name,
-        });
         return {
             follower: this.sanitize(followerDoc),
             followed: this.sanitize(followedDoc),
@@ -389,10 +385,6 @@ export class UsersService implements OnModuleInit {
             )
             .lean<UserLean>();
 
-        await this.logger.action('unfollow_user', actor, {
-            target_user: String(followed._id),
-            target_nick: followed.nick_name,
-        });
         return {
             follower: this.sanitize(followerDoc),
             followed: this.sanitize(followedDoc),

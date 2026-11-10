@@ -133,6 +133,49 @@ export class AdminListUsersQueryDto extends PaginationQueryDto {
     roles?: string;
 }
 
+export class ListRuntimeLogsQueryDto {
+    @ApiPropertyOptional({
+        enum: ['backend', 'socket', 'frontend'],
+    })
+    @IsIn(['backend', 'socket', 'frontend'])
+    source!: 'backend' | 'socket' | 'frontend';
+
+    @ApiPropertyOptional({ description: 'Comma separated levels' })
+    @IsOptional()
+    @IsString()
+    @MaxLength(40)
+    level?: string;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsString()
+    @MaxLength(200)
+    q?: string;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsISO8601()
+    from?: string;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @IsISO8601()
+    to?: string;
+
+    @ApiPropertyOptional({ description: 'Cursor: entries older than this' })
+    @IsOptional()
+    @IsISO8601()
+    before?: string;
+
+    @ApiPropertyOptional()
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt()
+    @Min(1)
+    @Max(500)
+    limit?: number;
+}
+
 export class ListLogsQueryDto extends PaginationQueryDto {
     @ApiPropertyOptional()
     @IsOptional()

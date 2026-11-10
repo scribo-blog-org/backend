@@ -1,3 +1,4 @@
+import { rlog } from '../../infra/rlog';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MailService } from '../../infra/mail.service';
@@ -56,7 +57,7 @@ export class PasswordResetService {
                 html: `<p>Code: <b>${code}</b></p>`,
             });
         } catch (error) {
-            console.error('Failed to send password reset email', error);
+            rlog.error('Failed to send password reset email', { error: error });
         }
     }
 
@@ -131,7 +132,9 @@ export class PasswordResetService {
                     html: `<p>Password changed.${settingsUrl ? ` <a href="${settingsUrl}">Sessions</a>` : ''}</p>`,
                 });
             } catch (error) {
-                console.error('Failed to send password change email', error);
+                rlog.error('Failed to send password change email', {
+                    error: error,
+                });
             }
         }
     }

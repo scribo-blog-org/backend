@@ -9,12 +9,12 @@ import { ApiExceptionFilter } from './api-exception.filter';
 
 function hostWith(
     request: Record<string, unknown>,
-    response: { status: jest.Mock; json: jest.Mock },
+    response: { status: jest.Mock; json: jest.Mock; locals?: object },
 ): ArgumentsHost {
     return {
         switchToHttp: () => ({
             getRequest: () => request,
-            getResponse: () => response,
+            getResponse: () => ({ locals: {}, ...response }),
         }),
     } as unknown as ArgumentsHost;
 }

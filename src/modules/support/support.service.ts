@@ -1,3 +1,4 @@
+import { rlog } from '../../infra/rlog';
 import {
     ForbiddenException,
     HttpStatus,
@@ -96,7 +97,9 @@ export class SupportService {
             );
             this.socket.adminSupportNew(count);
         } catch (error) {
-            console.error('Failed to broadcast new support requests', error);
+            rlog.error('Failed to broadcast new support requests', {
+                error: error,
+            });
         }
     }
 
@@ -273,7 +276,7 @@ export class SupportService {
                 html: supportEmailTemplate(input),
             });
         } catch (error) {
-            console.error('Failed to send support email', error);
+            rlog.error('Failed to send support email', { error: error });
         }
     }
 

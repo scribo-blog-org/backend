@@ -406,13 +406,6 @@ export class CommentsService {
                 { returnDocument: 'after', runValidators: true },
             )
             .lean();
-        await this.logger.action('like_comment', actor, {
-            post: String(comment.post_id),
-            post_title: await this.postTitle(comment.post_id),
-            comment: commentId,
-            comment_text: textPreview(comment.comment_text),
-            comment_author: String(comment.author),
-        });
         return liked;
     }
 
@@ -433,13 +426,6 @@ export class CommentsService {
                 { returnDocument: 'after', runValidators: true },
             )
             .lean();
-        await this.logger.action('unlike_comment', actor, {
-            post: String(comment.post_id),
-            post_title: await this.postTitle(comment.post_id),
-            comment: commentId,
-            comment_text: textPreview(comment.comment_text),
-            comment_author: String(comment.author),
-        });
         return unliked;
     }
 

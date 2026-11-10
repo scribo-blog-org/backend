@@ -26,6 +26,7 @@ export type RequestSample = {
     method: string;
     path: string;
     request_id: string | null;
+    error?: string | null;
 };
 
 const storage = new AsyncLocalStorage<RequestMeta>();
@@ -129,6 +130,10 @@ export function requestTimingMiddleware(
                 method: req.method,
                 path: meta?.path ?? (req.originalUrl || '').split('?')[0],
                 request_id: meta?.id ?? null,
+                error:
+                    typeof res.locals?.error_message === 'string'
+                        ? res.locals.error_message
+                        : null,
             });
         });
         dbStorage.run(timer, next);

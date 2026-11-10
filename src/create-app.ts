@@ -12,9 +12,11 @@ import {
 import { ApiExceptionFilter } from './http/api-exception.filter';
 import { onSlowQuery } from './database/db-timing.plugin';
 import { LoggerService } from './infra/logger.service';
+import { rlog } from './infra/rlog';
 import {
     requestContextMiddleware,
     requestTimingMiddleware,
+    type RequestSample,
 } from './infra/request-context';
 import { RequestMetricsService } from './modules/analytics/request-metrics.service';
 import { openApiDocument } from './http/openapi-document';
@@ -36,6 +38,27 @@ function isLocalBrowserOrigin(origin: string): boolean {
     }
 }
 
+const REQUEST_LOG_SKIPPED =
+    /^\/(health|uploads\/|api\/analytics\/|api\/logs\/runtime)/;
+
+function logRequest(sample: RequestSample) {
+    if (REQUEST_LOG_SKIPPED.test(sample.path)) return;
+    rlog.write(
+        sample.status >= 500 ? 'error' : 'info',
+        `${sample.method} ${sample.path}`,
+        {
+            status: sample.status,
+            method: sample.method,
+            path: sample.path,
+            total_ms: Math.round(sample.total_ms),
+            db_ms: Math.round(sample.db_ms),
+            db_queries: sample.db_queries,
+            request_id: sample.request_id,
+            ...(sample.user ? { user: sample.user } : {}),
+            ...(sample.error ? { error_message: sample.error } : {}),
+        },
+    );
+}
 function loggerOf(app: INestApplication): LoggerService | undefined {
     try {
         return app.get(LoggerService, { strict: false });
@@ -78,6 +101,7 @@ export async function configureScriboApp(
     if (metrics || logger) {
         app.use(
             requestTimingMiddleware((sample) => {
+                logRequest(sample);
                 metrics?.record(sample);
                 void logger?.slowRequest(sample);
             }),

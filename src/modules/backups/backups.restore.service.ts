@@ -1,3 +1,4 @@
+import { rlog } from '../../infra/rlog';
 import {
     ConflictException,
     Injectable,
@@ -163,7 +164,7 @@ export class BackupRestoreService implements OnModuleInit {
             safetyFile = fresh?.file_name ?? null;
             await this.archives
                 .prune()
-                .catch((e) => console.error('backup prune failed', e));
+                .catch((e) => rlog.error('backup prune failed', { error: e }));
             await writeLock(this.dir, {
                 backup_id: job.backup_id,
                 file_name: job.file_name,
@@ -231,11 +232,11 @@ export class BackupRestoreService implements OnModuleInit {
                           restored_by: userId,
                       }
                     : undefined,
-            ).catch((e) => console.error('restore state not saved', e));
+            ).catch((e) => rlog.error('restore state not saved', { error: e }));
             await removeLock(this.dir);
             if (!error) {
                 await syncDbMeta(this.connection, appVersion()).catch((e) =>
-                    console.error('database version was not synced', e),
+                    rlog.error('database version was not synced', { error: e }),
                 );
             }
             let safetyRemoved = false;
@@ -244,7 +245,7 @@ export class BackupRestoreService implements OnModuleInit {
                     .discardSnapshot(safetyId)
                     .then(() => true)
                     .catch((e) => {
-                        console.error('safety snapshot not removed', e);
+                        rlog.error('safety snapshot not removed', { error: e });
                         return false;
                     });
             }
