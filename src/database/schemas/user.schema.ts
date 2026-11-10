@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 import { DEFAULT_ROLE, ROLE_VALUES, type Role } from '../../authz/roles';
 import { FIELD_LIMITS } from '../../validation/field-limits';
 import { Notification, NotificationSchema } from './notification.schema';
@@ -63,13 +63,22 @@ export class User {
     @Prop({ required: true, default: true })
     is_last_activity_public!: boolean;
 
-    @Prop({ type: [{ type: Types.ObjectId, ref: 'Post' }], default: [] })
+    @Prop({
+        type: [{ type: MongooseSchema.Types.ObjectId, ref: 'Post' }],
+        default: [],
+    })
     saved_posts!: Types.ObjectId[];
 
-    @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
+    @Prop({
+        type: [{ type: MongooseSchema.Types.ObjectId, ref: 'User' }],
+        default: [],
+    })
     follows!: Types.ObjectId[];
 
-    @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
+    @Prop({
+        type: [{ type: MongooseSchema.Types.ObjectId, ref: 'User' }],
+        default: [],
+    })
     followers!: Types.ObjectId[];
 
     @Prop({
