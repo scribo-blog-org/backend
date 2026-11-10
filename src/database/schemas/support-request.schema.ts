@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 import { FIELD_LIMITS } from '../../validation/field-limits';
 
 @Schema({ collection: 'supportrequests' })
@@ -36,7 +36,7 @@ export class SupportRequest {
     @Prop({ required: true, default: true })
     anonymous!: boolean;
 
-    @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+    @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', default: null })
     user?: Types.ObjectId | null;
 
     @Prop({ required: true, default: Date.now })

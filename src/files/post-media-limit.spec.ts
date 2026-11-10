@@ -66,9 +66,6 @@ describe('lazy multer limit', () => {
     let url: string;
 
     beforeAll(async () => {
-        // Same shape as postMediaFilesInterceptor(): a limits object with a
-        // getter, passed through the `{ ...options, ...localOptions }` spread
-        // that Nest's interceptor mixin performs.
         const options = {
             limits: {
                 get fileSize() {

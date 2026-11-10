@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 
 export const BACKUP_STATUSES = ['running', 'success', 'failed'] as const;
 export type BackupStatus = (typeof BACKUP_STATUSES)[number];
@@ -20,7 +20,7 @@ export class Backup {
     @Prop({ type: String, required: true, enum: BACKUP_TRIGGERS })
     trigger!: BackupTrigger;
 
-    @Prop({ type: Types.ObjectId, ref: 'User', default: null })
+    @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', default: null })
     triggered_by?: Types.ObjectId | null;
 
     @Prop({ required: true, default: Date.now })
