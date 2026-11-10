@@ -4,8 +4,6 @@ node_modules
 
 # env
 .env
-.env.*
-!.env.example
 
 # logs / os
 *.log

@@ -1,11 +1,11 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 import type { MediaItem } from '../../modules/posts/media';
 import { FIELD_LIMITS } from '../../validation/field-limits';
 
 @Schema({ collection: 'posts' })
 export class Post {
-    @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+    @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
     author!: Types.ObjectId;
 
     @Prop()
@@ -20,7 +20,10 @@ export class Post {
     @Prop({ required: true, default: Date.now })
     created_date!: Date;
 
-    @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
+    @Prop({
+        type: [{ type: MongooseSchema.Types.ObjectId, ref: 'User' }],
+        default: [],
+    })
     likes!: Types.ObjectId[];
 
     @Prop({ type: Number, default: 0, min: 0 })

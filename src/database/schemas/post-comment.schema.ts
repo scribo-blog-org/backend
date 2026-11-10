@@ -1,10 +1,10 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 import { FIELD_LIMITS } from '../../validation/field-limits';
 
 @Schema({ collection: 'post_comments' })
 export class PostComment {
-    @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+    @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
     author!: Types.ObjectId;
 
     @Prop({
@@ -14,16 +14,24 @@ export class PostComment {
     })
     comment_text!: string;
 
-    @Prop({ type: Types.ObjectId, ref: 'Post', required: true, index: true })
+    @Prop({
+        type: MongooseSchema.Types.ObjectId,
+        ref: 'Post',
+        required: true,
+        index: true,
+    })
     post_id!: Types.ObjectId;
 
     @Prop({ required: true, default: Date.now })
     created_date!: Date;
 
-    @Prop({ type: Types.ObjectId, default: null, index: true })
+    @Prop({ type: MongooseSchema.Types.ObjectId, default: null, index: true })
     parent_comment_id!: Types.ObjectId | null;
 
-    @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
+    @Prop({
+        type: [{ type: MongooseSchema.Types.ObjectId, ref: 'User' }],
+        default: [],
+    })
     likes!: Types.ObjectId[];
 }
 

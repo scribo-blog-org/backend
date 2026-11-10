@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 import {
     NOTIFICATION_TYPES,
     type NotificationType,
@@ -22,13 +22,13 @@ export class Notification {
     })
     type!: NotificationType;
 
-    @Prop({ type: Types.ObjectId, ref: 'User' })
+    @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User' })
     user?: Types.ObjectId;
 
-    @Prop({ type: Types.ObjectId, ref: 'Post' })
+    @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Post' })
     post?: Types.ObjectId;
 
-    @Prop({ type: Types.ObjectId, ref: 'PostComment' })
+    @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'PostComment' })
     comment?: Types.ObjectId;
 
     @Prop({ type: String })

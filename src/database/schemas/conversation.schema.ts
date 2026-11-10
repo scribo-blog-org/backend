@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 
 export type ConversationDocument = HydratedDocument<Conversation>;
 export type ConversationKind = 'direct' | 'group';
@@ -7,7 +7,7 @@ export type ConversationRole = 'admin' | 'member';
 
 @Schema({ _id: false })
 export class ConversationMember {
-    @Prop({ type: Types.ObjectId, ref: 'User', required: true })
+    @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'User', required: true })
     user_id!: Types.ObjectId;
 
     @Prop({ required: true, enum: ['admin', 'member'], default: 'member' })
@@ -34,13 +34,21 @@ export class Conversation {
     @Prop({ type: String, default: null })
     photo?: string | null;
 
-    @Prop({ type: [Types.ObjectId], ref: 'User', required: true })
+    @Prop({
+        type: [MongooseSchema.Types.ObjectId],
+        ref: 'User',
+        required: true,
+    })
     participants!: Types.ObjectId[];
 
     @Prop({ type: [ConversationMemberSchema], default: [] })
     members!: ConversationMember[];
 
-    @Prop({ type: Types.ObjectId, ref: 'ChatMessage', default: null })
+    @Prop({
+        type: MongooseSchema.Types.ObjectId,
+        ref: 'ChatMessage',
+        default: null,
+    })
     last_message_id?: Types.ObjectId | null;
 
     @Prop({ default: '' })
