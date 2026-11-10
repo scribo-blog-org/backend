@@ -27,6 +27,7 @@ export type RequestSample = {
     path: string;
     request_id: string | null;
     error?: string | null;
+    query?: Record<string, string> | null;
 };
 
 const storage = new AsyncLocalStorage<RequestMeta>();
@@ -99,6 +100,25 @@ export function requestContextMiddleware(
     storage.run(meta, next);
 }
 
+const SENSITIVE_QUERY =
+    /pass|secret|token|auth|cookie|key|signature|code|email/i;
+
+export function queryOfUrl(url: string): Record<string, string> | null {
+    const index = url.indexOf('?');
+    if (index < 0) return null;
+    const out: Record<string, string> = {};
+    let count = 0;
+    for (const [key, value] of new URLSearchParams(url.slice(index + 1))) {
+        if (count++ >= 20) break;
+        const name = key.slice(0, 60);
+        const safe = SENSITIVE_QUERY.test(key)
+            ? '[redacted]'
+            : value.slice(0, 120);
+        out[name] = name in out ? `${out[name]},${safe}` : safe;
+    }
+    return Object.keys(out).length ? out : null;
+}
+
 export function requestTimingMiddleware(
     record: (sample: RequestSample) => void,
 ) {
@@ -130,6 +150,7 @@ export function requestTimingMiddleware(
                 method: req.method,
                 path: meta?.path ?? (req.originalUrl || '').split('?')[0],
                 request_id: meta?.id ?? null,
+                query: queryOfUrl(req.originalUrl || ''),
                 error:
                     typeof res.locals?.error_message === 'string'
                         ? res.locals.error_message

@@ -55,6 +55,7 @@ function logRequest(sample: RequestSample) {
             db_queries: sample.db_queries,
             request_id: sample.request_id,
             ...(sample.user ? { user: sample.user } : {}),
+            ...(sample.query ? { query: sample.query } : {}),
             ...(sample.error ? { error_message: sample.error } : {}),
         },
     );

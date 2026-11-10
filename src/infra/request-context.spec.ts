@@ -1,4 +1,4 @@
-import { requestMeta, unionMs } from './request-context';
+import { queryOfUrl, requestMeta, unionMs } from './request-context';
 import { filterShape } from '../database/db-timing.plugin';
 
 describe('unionMs', () => {
@@ -38,5 +38,29 @@ describe('filterShape', () => {
         expect(
             filterShape({ user: 'u1', age: { $gt: 18 }, tags: { $in: ['a'] } }),
         ).toEqual({ user: '?', age: { $gt: '?' }, tags: { $in: ['?'] } });
+    });
+});
+
+describe('queryOfUrl', () => {
+    it('returns null without a query string', () => {
+        expect(queryOfUrl('/api/posts')).toBeNull();
+    });
+
+    it('keeps plain params and hides sensitive ones', () => {
+        expect(
+            queryOfUrl('/api/support?status=new&limit=1&token=abc&email=a@b.c'),
+        ).toEqual({
+            status: 'new',
+            limit: '1',
+            token: '[redacted]',
+            email: '[redacted]',
+        });
+    });
+
+    it('joins repeated keys and caps long values', () => {
+        const long = 'x'.repeat(300);
+        const out = queryOfUrl(`/api/posts?_id=a&_id=b&q=${long}`);
+        expect(out?._id).toBe('a,b');
+        expect(out?.q).toHaveLength(120);
     });
 });
