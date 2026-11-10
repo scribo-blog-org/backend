@@ -6,7 +6,6 @@ import { hasPermission, type Actor } from '../../authz/policy';
 import { paginationMeta, parsePagination } from '../../http/pagination';
 import type { ListLogsQueryDto } from '../../http/query.dto';
 import { AppLog } from '../../database/schemas/log.schema';
-import { Category } from '../../database/schemas/category.schema';
 import { Conversation } from '../../database/schemas/conversation.schema';
 import { Post } from '../../database/schemas/post.schema';
 import { User } from '../../database/schemas/user.schema';
@@ -69,8 +68,6 @@ export class LogsQueryService {
         @InjectModel(AppLog.name) private readonly logs: Model<AppLog>,
         @InjectModel(User.name) private readonly users: Model<User>,
         @InjectModel(Post.name) private readonly posts: Model<Post>,
-        @InjectModel(Category.name)
-        private readonly categories: Model<Category>,
         @InjectModel(Conversation.name)
         private readonly conversations: Model<Conversation>,
     ) {}
@@ -99,11 +96,6 @@ export class LogsQueryService {
         }
         if (query.post)
             Object.assign(filter, this.idMatch('data.post', query.post));
-        if (query.category)
-            Object.assign(
-                filter,
-                this.idMatch('data.category', query.category),
-            );
         if (query.conversation) {
             const matches = ['data.conversation', 'data.conversations'].map(
                 (path) => this.idMatch(path, query.conversation!),
@@ -176,7 +168,6 @@ export class LogsQueryService {
                 collections: {
                     users: this.users.collection.name,
                     posts: this.posts.collection.name,
-                    categories: this.categories.collection.name,
                     conversations: this.conversations.collection.name,
                 },
                 skip,

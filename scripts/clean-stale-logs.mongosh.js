@@ -8,7 +8,6 @@ const ids = (name) =>
             .map((item) => String(item._id)),
     );
 const posts = ids('posts');
-const categories = ids('categories');
 const users = ids('users');
 const empty = (value) => value === null || value === undefined || value === '';
 
@@ -20,12 +19,6 @@ db.logs.find({}).forEach((log) => {
     if (log.type === 'edit_post') reasons.push('legacy type edit_post');
     if (data.post && !posts.has(String(data.post)) && empty(data.post_title))
         reasons.push('post gone, no title snapshot');
-    if (
-        data.category &&
-        !categories.has(String(data.category)) &&
-        empty(data.category_snapshot && data.category_snapshot.name)
-    )
-        reasons.push('category gone, no snapshot');
     if (data.user && !users.has(String(data.user)) && empty(data.user_nick))
         reasons.push('user gone, no nick snapshot');
     if (

@@ -1,6 +1,6 @@
 import type { PipelineStage } from 'mongoose';
 
-export type LogEntityType = 'user' | 'post' | 'category' | 'conversation';
+export type LogEntityType = 'user' | 'post' | 'conversation';
 
 export type LogEntity = {
     type: LogEntityType;
@@ -14,7 +14,6 @@ export type LogEntity = {
 export type EntityCollections = {
     users: string;
     posts: string;
-    categories: string;
     conversations: string;
 };
 
@@ -28,7 +27,11 @@ const entry = (type: LogEntityType, id: string, name: string) => ({
     name,
 });
 
-const live = (from: string, field: string, as: string): PipelineStage[] => [
+const live = (
+    from: string,
+    field: string | null,
+    as: string,
+): PipelineStage[] => [
     {
         $lookup: {
             from,
@@ -44,7 +47,7 @@ const live = (from: string, field: string, as: string): PipelineStage[] => [
             },
             pipeline: [
                 { $match: { $expr: { $eq: ['$_id', '$$id'] } } },
-                { $project: { _id: 0, name: `$${field}` } },
+                { $project: { _id: 0, name: field ? `$${field}` : null } },
             ],
             as,
         },
@@ -68,11 +71,6 @@ export function entitiesPipeline(options: {
                     entry('user', '$data.target_user', '$data.target_nick'),
                     entry('user', '$data.updated_user', '$data.target_nick'),
                     entry('post', '$data.post', '$data.post_title'),
-                    entry(
-                        'category',
-                        '$data.category',
-                        '$data.category_snapshot.name',
-                    ),
                     entry('conversation', '$data.conversation', '$data.title'),
                 ],
             },
@@ -94,8 +92,7 @@ export function entitiesPipeline(options: {
             },
         },
         ...live(collections.users, 'nick_name', 'liveUser'),
-        ...live(collections.posts, 'title', 'livePost'),
-        ...live(collections.categories, 'name', 'liveCategory'),
+        ...live(collections.posts, null, 'livePost'),
         ...live(collections.conversations, 'title', 'liveConversation'),
         {
             $addFields: {
@@ -116,20 +113,9 @@ export function entitiesPipeline(options: {
                                             $arrayElemAt: ['$livePost.name', 0],
                                         },
                                     },
-                                    {
-                                        case: {
-                                            $eq: ['$_id.type', 'conversation'],
-                                        },
-                                        then: {
-                                            $arrayElemAt: [
-                                                '$liveConversation.name',
-                                                0,
-                                            ],
-                                        },
-                                    },
                                 ],
                                 default: {
-                                    $arrayElemAt: ['$liveCategory.name', 0],
+                                    $arrayElemAt: ['$liveConversation.name', 0],
                                 },
                             },
                         },
@@ -158,17 +144,8 @@ export function entitiesPipeline(options: {
                                             },
                                             then: '$livePost',
                                         },
-                                        {
-                                            case: {
-                                                $eq: [
-                                                    '$_id.type',
-                                                    'conversation',
-                                                ],
-                                            },
-                                            then: '$liveConversation',
-                                        },
                                     ],
-                                    default: '$liveCategory',
+                                    default: '$liveConversation',
                                 },
                             },
                         },
@@ -192,7 +169,6 @@ export function entitiesPipeline(options: {
                         $project: {
                             liveUser: 0,
                             livePost: 0,
-                            liveCategory: 0,
                             liveConversation: 0,
                             snapshot: 0,
                         },

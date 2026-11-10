@@ -1,12 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Category } from '../../database/schemas/category.schema';
 import { Post } from '../../database/schemas/post.schema';
 import { PostComment } from '../../database/schemas/post-comment.schema';
 import { User } from '../../database/schemas/user.schema';
 import { UsersService } from '../users/users.service';
 import { SearchQueryLog } from '../../database/schemas/search-query.schema';
+import { legacyMedia, type MediaItem } from '../posts/media';
+import { postExcerpt } from '../posts/post-html';
 
 const RESULT_LIMIT = 8;
 const CANDIDATE_LIMIT = 40;
@@ -81,8 +82,6 @@ export class SearchService {
         @InjectModel(PostComment.name)
         private readonly comments: Model<PostComment>,
         @InjectModel(User.name) private readonly users: Model<User>,
-        @InjectModel(Category.name)
-        private readonly categories: Model<Category>,
         @InjectModel(SearchQueryLog.name)
         private readonly searchLogs: Model<SearchQueryLog>,
         private readonly usersService: UsersService,
@@ -98,12 +97,9 @@ export class SearchService {
         const [docs, commentDocs] = await Promise.all([
             this.posts
                 .find({
-                    $or: [
-                        { title: fieldRegex(prefix) },
-                        { content_text: fieldRegex(prefix) },
-                    ],
+                    $or: [{ content_text: fieldRegex(prefix) }],
                 })
-                .select('title content_text')
+                .select('content_text')
                 .limit(CANDIDATE_LIMIT)
                 .lean(),
             this.comments
@@ -115,9 +111,7 @@ export class SearchService {
 
         const counts = new Map<string, number>();
         for (const doc of docs) {
-            for (const tag of extractHashtags(
-                `${doc.title} ${doc.content_text || ''}`,
-            )) {
+            for (const tag of extractHashtags(`${doc.content_text || ''}`)) {
                 if (tag.startsWith(prefix)) {
                     counts.set(tag, (counts.get(tag) || 0) + 1);
                 }
@@ -140,7 +134,7 @@ export class SearchService {
     async search(raw?: string, meta?: { ip?: string }) {
         const needle = normalizeQuery(String(raw || ''));
         if (needle.length < MIN_QUERY) {
-            return { posts: [], users: [], categories: [] };
+            return { posts: [], users: [] };
         }
 
         const payload = isHashtagQuery(needle)
@@ -154,10 +148,7 @@ export class SearchService {
     private async searchHashtag(needle: string) {
         const postDocs = await this.posts
             .find({
-                $or: [
-                    { title: fieldRegex(needle) },
-                    { content_text: fieldRegex(needle) },
-                ],
+                $or: [{ content_text: fieldRegex(needle) }],
             })
             .sort({ created_date: -1 })
             .limit(CANDIDATE_LIMIT)
@@ -165,14 +156,11 @@ export class SearchService {
 
         const postsFiltered = postDocs
             .filter((post) =>
-                hasExactHashtag(
-                    `${post.title} ${post.content_text || ''}`,
-                    needle,
-                ),
+                hasExactHashtag(`${post.content_text || ''}`, needle),
             )
             .slice(0, RESULT_LIMIT);
 
-        return this.toSearchPayload(postsFiltered, [], [], needle);
+        return this.toSearchPayload(postsFiltered, [], needle);
     }
 
     private async searchText(needle: string) {
@@ -180,17 +168,11 @@ export class SearchService {
         const postMatch =
             parts.length === 1
                 ? {
-                      $or: [
-                          { title: fieldRegex(parts[0]) },
-                          { content_text: fieldRegex(parts[0]) },
-                      ],
+                      $or: [{ content_text: fieldRegex(parts[0]) }],
                   }
                 : {
                       $and: parts.map((part) => ({
-                          $or: [
-                              { title: fieldRegex(part) },
-                              { content_text: fieldRegex(part) },
-                          ],
+                          $or: [{ content_text: fieldRegex(part) }],
                       })),
                   };
 
@@ -201,7 +183,7 @@ export class SearchService {
             ],
         };
 
-        const [postDocs, userDocs, categoryDocs] = await Promise.all([
+        const [postDocs, userDocs] = await Promise.all([
             this.posts
                 .find(postMatch)
                 .sort({ created_date: -1 })
@@ -212,18 +194,11 @@ export class SearchService {
                 .select('_id nick_name avatar is_verified description')
                 .limit(CANDIDATE_LIMIT)
                 .lean(),
-            this.categories
-                .find({ name: fieldRegex(needle) })
-                .limit(RESULT_LIMIT)
-                .lean(),
         ]);
 
         const postsFiltered = postDocs
             .filter((post) =>
-                containsNeedle(
-                    `${post.title} ${post.content_text || ''}`,
-                    needle,
-                ),
+                containsNeedle(`${post.content_text || ''}`, needle),
             )
             .slice(0, RESULT_LIMIT);
         const usersFiltered = userDocs
@@ -233,16 +208,8 @@ export class SearchService {
                     containsNeedle(user.description || '', needle),
             )
             .slice(0, RESULT_LIMIT);
-        const categoriesFiltered = categoryDocs
-            .filter((category) => containsNeedle(category.name, needle))
-            .slice(0, RESULT_LIMIT);
 
-        return this.toSearchPayload(
-            postsFiltered,
-            usersFiltered,
-            categoriesFiltered,
-            needle,
-        );
+        return this.toSearchPayload(postsFiltered, usersFiltered, needle);
     }
 
     private async logQuery(
@@ -250,7 +217,6 @@ export class SearchService {
         payload: {
             posts: unknown[];
             users: unknown[];
-            categories: unknown[];
         },
         meta?: { ip?: string },
     ) {
@@ -271,14 +237,12 @@ export class SearchService {
             }
             const posts = payload.posts?.length || 0;
             const users = payload.users?.length || 0;
-            const categories = payload.categories?.length || 0;
             await this.searchLogs.create({
                 query: needle.slice(0, 80),
                 kind: isHashtagQuery(needle) ? 'hashtag' : 'text',
-                hits: posts + users + categories,
+                hits: posts + users,
                 posts,
                 users,
-                categories,
                 ip,
             });
         } catch {
@@ -290,14 +254,12 @@ export class SearchService {
         postsFiltered: Array<{
             _id: unknown;
             author: Types.ObjectId;
-            category: unknown;
-            title: string;
             content_text?: string;
             featured_image?: string | null;
+            media?: MediaItem[] | null;
             created_date?: Date;
         }>,
         usersFiltered: unknown[],
-        categoriesFiltered: unknown[],
         needle = '',
     ) {
         const authors = await this.usersService.getPublicByIds(
@@ -307,39 +269,21 @@ export class SearchService {
             authors.map((item) => [String(item._id), item]),
         );
 
-        const categoryIds = [
-            ...new Set(postsFiltered.map((post) => String(post.category))),
-        ].filter((id) => Types.ObjectId.isValid(id));
-        const postCategories = categoryIds.length
-            ? await this.categories
-                  .find({
-                      _id: {
-                          $in: categoryIds.map((id) => new Types.ObjectId(id)),
-                      },
-                  })
-                  .lean()
-            : [];
-        const categoryMap = new Map(
-            postCategories.map((item) => [String(item._id), item]),
-        );
-
         return {
             posts: postsFiltered.map((post) => ({
                 _id: post._id,
-                title: post.title,
-                featured_image: post.featured_image || null,
+                excerpt: postExcerpt(post.content_text),
+                media: legacyMedia(post),
                 created_date: post.created_date,
                 snippet: snippetAround(
                     containsNeedle(String(post.content_text || ''), needle)
                         ? String(post.content_text || '')
-                        : String(post.title || ''),
+                        : postExcerpt(post.content_text),
                     needle,
                 ),
                 author: authorMap.get(String(post.author)) || null,
-                category: categoryMap.get(String(post.category)) || null,
             })),
             users: usersFiltered,
-            categories: categoriesFiltered,
         };
     }
 }

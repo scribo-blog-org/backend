@@ -51,12 +51,6 @@ export class ListPostsQueryDto extends PaginationQueryDto {
     @IsString()
     author?: string;
 
-    @ApiPropertyOptional({ isArray: true, type: String })
-    @IsOptional()
-    @Transform(({ value }) => joinRepeatableQuery({ value }))
-    @IsString()
-    category?: string;
-
     @ApiPropertyOptional()
     @IsOptional()
     @IsString()
@@ -149,11 +143,6 @@ export class ListLogsQueryDto extends PaginationQueryDto {
     @IsOptional()
     @IsString()
     post?: string;
-
-    @ApiPropertyOptional()
-    @IsOptional()
-    @IsString()
-    category?: string;
 
     @ApiPropertyOptional()
     @IsOptional()

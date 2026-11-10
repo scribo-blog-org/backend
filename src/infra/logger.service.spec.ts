@@ -1,11 +1,6 @@
 import { LoggerService } from './logger.service';
 import { requestContextMiddleware, requestMeta } from './request-context';
-import {
-    categorySnapshot,
-    changeOf,
-    compact,
-    textPreview,
-} from './log-helpers';
+import { changeOf, compact, textPreview } from './log-helpers';
 
 function setup() {
     const created: Array<Record<string, any>> = [];
@@ -114,18 +109,6 @@ describe('log helpers', () => {
             from: false,
             to: true,
         });
-    });
-
-    it('categorySnapshot keeps what is needed to draw the chip later', () => {
-        expect(
-            categorySnapshot({
-                name: 'News',
-                icon: 4,
-                color: 2,
-                extra: 1,
-            } as never),
-        ).toEqual({ name: 'News', icon: 4, color: 2 });
-        expect(categorySnapshot(null)).toBeNull();
     });
 
     it('compact drops empty entries', () => {
