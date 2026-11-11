@@ -231,4 +231,104 @@ describe('runtime log reader', () => {
         expect(page.next).toBe('2026-01-02T00:00:02.000Z');
         rmSync(root, { recursive: true, force: true });
     });
+
+    describe('status, duration and the newer-than cursor', () => {
+        const setup = () => {
+            const root = tmp();
+            mkdirSync(join(root, 'backend'));
+            const row = (sec: number, status: number, ms: number) =>
+                JSON.stringify({
+                    ts: `2026-01-02T00:00:0${sec}.000Z`,
+                    level: 'info',
+                    service: 'backend',
+                    msg: `r${sec}`,
+                    status,
+                    total_ms: ms,
+                });
+            writeFileSync(
+                join(root, 'backend', 'backend.log'),
+                [
+                    row(1, 200, 5),
+                    row(2, 404, 50),
+                    row(3, 200, 400),
+                    row(4, 500, 1500),
+                    row(5, 200, 20),
+                ].join('\n'),
+            );
+            return root;
+        };
+
+        it('filters by exact status', () => {
+            const root = setup();
+            const page = readRuntimeLogs(root, {
+                source: 'backend',
+                status: 200,
+            });
+            expect(page.items.map((i) => i.msg)).toEqual(['r5', 'r3', 'r1']);
+            rmSync(root, { recursive: true, force: true });
+        });
+
+        it('filters by a duration range, either side optional', () => {
+            const root = setup();
+            const both = readRuntimeLogs(root, {
+                source: 'backend',
+                min_ms: 10,
+                max_ms: 500,
+            });
+            expect(both.items.map((i) => i.msg)).toEqual(['r5', 'r3', 'r2']);
+            const slow = readRuntimeLogs(root, {
+                source: 'backend',
+                min_ms: 1000,
+            });
+            expect(slow.items.map((i) => i.msg)).toEqual(['r4']);
+            const fast = readRuntimeLogs(root, {
+                source: 'backend',
+                max_ms: 10,
+            });
+            expect(fast.items.map((i) => i.msg)).toEqual(['r1']);
+            rmSync(root, { recursive: true, force: true });
+        });
+
+        it('returns the entries nearest to the `after` cursor', () => {
+            const root = setup();
+            const page = readRuntimeLogs(root, {
+                source: 'backend',
+                after: '2026-01-02T00:00:01.000Z',
+                limit: 2,
+            });
+            // newer than r1 are r2..r5: the nearest two, newest first
+            expect(page.items.map((i) => i.msg)).toEqual(['r3', 'r2']);
+            expect(page.prev).toBe('2026-01-02T00:00:03.000Z');
+            const rest = readRuntimeLogs(root, {
+                source: 'backend',
+                after: page.prev as string,
+                limit: 5,
+            });
+            expect(rest.items.map((i) => i.msg)).toEqual(['r5', 'r4']);
+            expect(rest.prev).toBeNull();
+            rmSync(root, { recursive: true, force: true });
+        });
+
+        it('merges services for `after` too', () => {
+            const root = setup();
+            mkdirSync(join(root, 'frontend'));
+            writeFileSync(
+                join(root, 'frontend', 'frontend.log'),
+                JSON.stringify({
+                    ts: '2026-01-02T00:00:02.500Z',
+                    level: 'info',
+                    service: 'frontend',
+                    msg: 'f2.5',
+                }),
+            );
+            const page = readRuntimeLogs(root, {
+                sources: ['backend', 'frontend'],
+                after: '2026-01-02T00:00:01.000Z',
+                limit: 3,
+            });
+            expect(page.items.map((i) => i.msg)).toEqual(['r3', 'f2.5', 'r2']);
+            expect(page.prev).toBe('2026-01-02T00:00:03.000Z');
+            rmSync(root, { recursive: true, force: true });
+        });
+    });
 });
