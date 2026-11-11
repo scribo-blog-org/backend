@@ -168,6 +168,36 @@ export class ListRuntimeLogsQueryDto {
     @IsISO8601()
     before?: string;
 
+    @ApiPropertyOptional({
+        description:
+            'Cursor: entries newer than this (the nearest ones, newest first)',
+    })
+    @IsOptional()
+    @IsISO8601()
+    after?: string;
+
+    @ApiPropertyOptional({ description: 'Exact HTTP status code' })
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt()
+    @Min(100)
+    @Max(599)
+    status?: number;
+
+    @ApiPropertyOptional({ description: 'Minimum duration, ms' })
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt()
+    @Min(0)
+    min_ms?: number;
+
+    @ApiPropertyOptional({ description: 'Maximum duration, ms' })
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt()
+    @Min(0)
+    max_ms?: number;
+
     @ApiPropertyOptional()
     @IsOptional()
     @Type(() => Number)
